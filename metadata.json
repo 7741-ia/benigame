@@ -1,0 +1,6 @@
+{
+  "name": "Beni Life",
+  "description": "Simulation de vie et de livraison en monde ouvert à Beni, RDC.",
+  "permissions": [],
+  "capabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

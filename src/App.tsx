@@ -26,7 +26,6 @@ import {
 import { getVehicle } from "./game/vehicles";
 import { POIS, landmarkWorld, type PoiType } from "./game/districts";
 import type { LifeState, PlayerProfile, Recipe } from "./game/life";
-import { multiplayer } from "./game/network";
 import Minimap from "./components/Minimap";
 import TouchControls from "./components/TouchControls";
 import Garage from "./components/Garage";
@@ -118,18 +117,6 @@ export default function App() {
   const [profileOpen, setProfileOpen] = useState(false);
   const [lifePanel, setLifePanel] = useState<"home" | "market" | "activities" | null>(null);
   const toastId = useRef(0);
-
-  useEffect(() => {
-    const env = (import.meta as unknown as { env?: Record<string, string | undefined> }).env;
-    const url = env?.VITE_MULTIPLAYER_URL;
-    if (!url) return;
-    multiplayer.configure({
-      url,
-      authToken: env?.VITE_MULTIPLAYER_TOKEN,
-    });
-    multiplayer.connect();
-    return () => multiplayer.disconnect();
-  }, []);
 
   // PWA install prompt detection
   useEffect(() => {

@@ -1,7 +1,5 @@
-import { useEffect, useState } from "react";
 import type { HudState } from "../game/types";
 import type { PlayerProfile } from "../game/life";
-import { multiplayer } from "../game/network";
 
 interface Props {
   hud: HudState;
@@ -22,8 +20,6 @@ export default function Phone({
   onHome,
   onActivities,
 }: Props) {
-  const [networkStatus, setNetworkStatus] = useState(multiplayer.status);
-  useEffect(() => multiplayer.subscribe(setNetworkStatus), []);
   const apps = [
     { label: "Carte", detail: hud.navActive ? hud.navLabel : "Choisir une destination", icon: "🗺️", action: onMap },
     { label: "Profil", detail: profile.nickname, icon: "👤", action: onProfile },
@@ -67,14 +63,13 @@ export default function Phone({
 
           <div className="mt-4 rounded-2xl bg-white/5 p-4 ring-1 ring-white/10">
             <div className="flex items-center justify-between">
-              <div className="font-black">Amis et messages</div>
-              <span className="rounded bg-amber-400/15 px-2 py-1 text-[10px] font-bold text-amber-300">
-                {networkStatus === "unconfigured" ? "SERVEUR REQUIS" : networkStatus.toUpperCase()}
+              <div className="font-black">Mode de jeu</div>
+              <span className="rounded bg-emerald-400/15 px-2 py-1 text-[10px] font-bold text-emerald-300">
+                SOLO LOCAL
               </span>
             </div>
             <p className="mt-2 text-xs leading-relaxed text-white/50">
-              Aucun faux joueur n'est affiché. Les amis, demandes de discussion, blocages et signalements
-              seront activés uniquement après connexion à un serveur WebSocket authentifié.
+              Partie locale en solo à Beni. Toutes tes livraisons, achats et progressions sont sauvegardés localement sur ton appareil.
             </p>
           </div>
 

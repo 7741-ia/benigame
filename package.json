@@ -1,12 +1,13 @@
 {
-  "name": "react-vite-tailwind",
+  "name": "beni-life",
   "private": true,
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --host 0.0.0.0 --port 3000",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "lint": "tsc --noEmit"
   },
   "dependencies": {
     "@types/three": "^0.186.0",
@@ -22,7 +23,6 @@
     "@types/react": "19.2.7",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "5.1.1",
-    "playwright": "^1.63.0",
     "tailwindcss": "4.1.17",
     "typescript": "5.9.3",
     "vite": "7.3.2",
