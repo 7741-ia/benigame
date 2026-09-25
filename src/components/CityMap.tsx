@@ -225,26 +225,18 @@ export default function CityMap({ hud, onNavigate, onCancelNavigation, onClose }
         </div>
       </div>
 
-      <aside className="hidden w-80 border-l border-white/10 bg-slate-900/90 p-4 md:block">
+      <aside className="hidden w-80 border-l border-white/10 bg-slate-900/90 p-4 md:block overflow-y-auto">
         {selected ? (
           <PlaceDetails
             place={selected}
+            hud={hud}
             onNavigate={() => onNavigate(selected.x, selected.z, selected.name)}
+            onCancel={onCancelNavigation}
           />
         ) : (
           <div className="pt-10 text-center text-sm text-white/50">
-
-            Sélectionne un quartier, une avenue ou une activité.
-            
+            Sélectionne un quartier, une avenue ou une activité pour afficher ses détails complets.
           </div>
-        )}
-        {hud.navActive && (
-          <button
-            onClick={onCancelNavigation}
-            className="mt-4 w-full rounded-xl bg-red-500/15 py-3 text-sm font-black text-red-300 ring-1 ring-red-400/30"
-          >
-            Annuler la destination
-          </button>
         )}
       </aside>
 
@@ -252,8 +244,10 @@ export default function CityMap({ hud, onNavigate, onCancelNavigation, onClose }
         <div className="absolute inset-x-3 bottom-3 rounded-2xl bg-slate-900/95 p-3 shadow-2xl ring-1 ring-white/15 md:hidden">
           <PlaceDetails
             place={selected}
+            hud={hud}
             compact
             onNavigate={() => onNavigate(selected.x, selected.z, selected.name)}
+            onCancel={onCancelNavigation}
           />
         </div>
       )}
@@ -263,27 +257,122 @@ export default function CityMap({ hud, onNavigate, onCancelNavigation, onClose }
 
 function PlaceDetails({
   place,
+  hud,
   onNavigate,
+  onCancel,
   compact = false,
 }: {
   place: MapPlace;
+  hud: HudState;
   onNavigate: () => void;
+  onCancel: () => void;
   compact?: boolean;
 }) {
   const activity = poiActivities[place.kind as PoiType];
-  return (
-    <div className={compact ? "flex items-center gap-3" : "space-y-4"}>
-      <div className="text-3xl">{place.emoji}</div>
-      <div className="min-w-0 flex-1">
-        <h3 className="font-black">{place.name}</h3>
-        <p className="text-xs text-white/55">{activity || `${place.kind} accessible dans le jeu`}</p>
+  const distanceMeters = Math.round(Math.hypot(hud.playerX - place.x, hud.playerZ - place.z));
+  const missionsRemaining = Math.max(0, 20 - hud.deliveriesDone);
+  const isTargetSelected = hud.navActive && hud.navLabel === place.name;
+
+  if (compact) {
+    return (
+      <div className="space-y-2">
+        <div className="flex items-center gap-3">
+          <div className="text-3xl">{place.emoji}</div>
+          <div className="min-w-0 flex-1">
+            <h3 className="font-black text-sm text-white">{place.name}</h3>
+            <div className="flex items-center gap-2 text-[11px] text-white/60">
+              <span>📍 {distanceMeters} m</span>
+              <span>•</span>
+              <span className="text-amber-300 font-bold">{missionsRemaining} missions disp.</span>
+            </div>
+          </div>
+          {isTargetSelected ? (
+            <button
+              onClick={onCancel}
+              className="rounded-xl bg-red-500/20 px-3 py-1.5 text-xs font-black text-red-300 ring-1 ring-red-500/30"
+            >
+              Annuler
+            </button>
+          ) : (
+            <button
+              onClick={onNavigate}
+              className="rounded-xl bg-sky-400 px-3 py-1.5 text-xs font-black text-slate-950 active:scale-95"
+            >
+              Itinéraire
+            </button>
+          )}
+        </div>
       </div>
-      <button
-        onClick={onNavigate}
-        className="rounded-xl bg-sky-400 px-4 py-2 text-sm font-black text-slate-950 active:scale-95"
-      >
-        Itinéraire
-      </button>
+    );
+  }
+
+  return (
+    <div className="space-y-4 text-xs">
+      <div className="flex items-center gap-3 border-b border-white/10 pb-3">
+        <div className="text-4xl">{place.emoji}</div>
+        <div>
+          <div className="text-[10px] font-extrabold uppercase tracking-wider text-sky-400">
+            {place.kind}
+          </div>
+          <h3 className="text-base font-black text-white">{place.name}</h3>
+        </div>
+      </div>
+
+      {/* Informations demandées */}
+      <div className="space-y-2.5 rounded-xl bg-white/5 p-3 ring-1 ring-white/10">
+        <div>
+          <span className="text-white/50 block text-[10px] uppercase font-bold">Nom du quartier / lieu</span>
+          <span className="font-bold text-white text-sm">{place.name}</span>
+        </div>
+
+        <div className="flex justify-between border-t border-white/5 pt-2">
+          <span className="text-white/50">Missions disponibles :</span>
+          <span className="font-black text-emerald-400">
+            {missionsRemaining} / 20 (Niv. {hud.level})
+          </span>
+        </div>
+
+        <div className="flex justify-between border-t border-white/5 pt-2">
+          <span className="text-white/50">Distance :</span>
+          <span className="font-bold text-sky-300">{distanceMeters} m</span>
+        </div>
+
+        <div className="border-t border-white/5 pt-2">
+          <span className="text-white/50 block mb-0.5">Points importants :</span>
+          <span className="text-white/80 leading-relaxed">
+            {activity || `${place.kind} au cœur de Beni avec accès routier asphalté et pistes de livraison.`}
+          </span>
+        </div>
+
+        <div className="flex justify-between border-t border-white/5 pt-2 items-center">
+          <span className="text-white/50">Destination sélectionnée :</span>
+          <span
+            className={`font-black rounded px-2 py-0.5 text-[10px] ${
+              isTargetSelected
+                ? "bg-emerald-500/20 text-emerald-300 ring-1 ring-emerald-500/40"
+                : "bg-white/10 text-white/50"
+            }`}
+          >
+            {isTargetSelected ? "✓ Active (Guidage)" : "Non"}
+          </span>
+        </div>
+      </div>
+
+      {isTargetSelected ? (
+        <button
+          onClick={onCancel}
+          className="w-full rounded-xl bg-red-500/20 py-2.5 text-xs font-black text-red-300 ring-1 ring-red-500/30 hover:bg-red-500/30 transition"
+        >
+          Annuler la destination
+        </button>
+      ) : (
+        <button
+          onClick={onNavigate}
+          className="w-full rounded-xl bg-sky-400 py-2.5 text-xs font-black text-slate-950 hover:bg-sky-300 active:scale-95 transition"
+        >
+          Tracer l'itinéraire GPS
+        </button>
+      )}
     </div>
   );
 }

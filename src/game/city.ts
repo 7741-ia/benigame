@@ -13,6 +13,7 @@ import {
   PLACE_SIGNS,
 } from "./textures";
 import type { Quality } from "./environment";
+import { houseManager } from "./houseManager";
 
 export interface Collider {
   x: number;
@@ -437,7 +438,7 @@ export function buildCity(scene: THREE.Scene, _quality: Quality): CityResult {
   //  BÂTIMENTS VISITABLES AVEC INTÉRIEURS 3D COMPLETS
   // ─────────────────────────────────────────────────────────────
 
-  // 1. MAISON DU JOUEUR (Quartier Masiani) — Salon, Cuisine, Chambre, Salle de bain
+  // 1. MAISON DU JOUEUR (Quartier Masiani) — Salon, Cuisine, Salle à Manger, Chambre, Salle de bain
   const buildPlayerHouse = (hx: number, hz: number) => {
     const hw = 13.0;
     const hd = 10.0;
@@ -445,17 +446,29 @@ export function buildCity(scene: THREE.Scene, _quality: Quality): CityResult {
     const wallThick = 0.24;
     const floorY = 0.2;
 
-    // Sol carrelé intérieur
+    // Initialisation du manager d'interactions maison
+    houseManager.initHouseCoordinates(hx, hz);
+
+    // Sol carrelé intérieur propre
     add(floorTileMat, box(hw, 0.2, hd, hx, floorY, hz, 3));
 
     // Murs extérieurs avec porte d'entrée ouverte en façade Sud (z + hd/2)
-    // Façade avant coupée en deux avec passage de porte (1.2m)
     const doorW = 1.25;
     const frontHalf = (hw - doorW) / 2;
     add(wallMat, tint(box(frontHalf, wallH, wallThick, hx - doorW / 2 - frontHalf / 2, wallH / 2 + floorY, hz + hd / 2, 2), 0xebdaa8));
     add(wallMat, tint(box(frontHalf, wallH, wallThick, hx + doorW / 2 + frontHalf / 2, wallH / 2 + floorY, hz + hd / 2, 2), 0xebdaa8));
     // Linteau au-dessus de la porte
     add(wallMat, tint(box(doorW, wallH - 2.2, wallThick, hx, 2.2 + (wallH - 2.2) / 2 + floorY, hz + hd / 2, 1), 0xebdaa8));
+
+    // Porte d'entrée interactive pivotante
+    const frontHinge = new THREE.Group();
+    frontHinge.position.set(hx - doorW / 2 + 0.05, floorY + 0.1, hz + hd / 2);
+    const frontDoorMesh = new THREE.Mesh(new THREE.BoxGeometry(doorW - 0.05, 2.15, 0.06), woodMat);
+    frontDoorMesh.position.set((doorW - 0.05) / 2, 2.15 / 2, 0);
+    frontDoorMesh.castShadow = true;
+    frontHinge.add(frontDoorMesh);
+    scene.add(frontHinge);
+    houseManager.frontDoorGroup = frontHinge;
 
     // Mur arrière Nord plein
     add(wallMat, tint(box(hw, wallH, wallThick, hx, wallH / 2 + floorY, hz - hd / 2, 3), 0xebdaa8));
@@ -465,37 +478,107 @@ export function buildCity(scene: THREE.Scene, _quality: Quality): CityResult {
     add(wallMat, tint(box(wallThick, wallH, hd, hx - hw / 2, wallH / 2 + floorY, hz, 3), 0xebdaa8));
 
     // Cloisons intérieures :
-    // Cloison Est-Ouest séparant jour (Sud) et nuit (Nord)
+    // Cloison Est-Ouest séparant jour (Sud) et nuit (Nord) avec passages de porte
     add(wallMat, tint(box(hw * 0.42, wallH, wallThick, hx - hw * 0.28, wallH / 2 + floorY, hz, 2), 0xf1ede6));
     add(wallMat, tint(box(hw * 0.42, wallH, wallThick, hx + hw * 0.28, wallH / 2 + floorY, hz, 2), 0xf1ede6));
     // Cloison Nord-Sud séparant Chambre et Salle de bain
     add(wallMat, tint(box(wallThick, wallH, hd * 0.45, hx, wallH / 2 + floorY, hz - hd * 0.26, 2), 0xf1ede6));
 
+    // Portes intérieures pivotantes (Chambre & Salle de bain)
+    const bedHinge = new THREE.Group();
+    bedHinge.position.set(hx - 0.65, floorY + 0.1, hz);
+    const bedDoorMesh = new THREE.Mesh(new THREE.BoxGeometry(0.85, 2.1, 0.05), woodMat);
+    bedDoorMesh.position.set(-0.85 / 2, 2.1 / 2, 0);
+    bedHinge.add(bedDoorMesh);
+    scene.add(bedHinge);
+    houseManager.bedroomDoorGroup = bedHinge;
+
+    const bathHinge = new THREE.Group();
+    bathHinge.position.set(hx + 0.65, floorY + 0.1, hz);
+    const bathDoorMesh = new THREE.Mesh(new THREE.BoxGeometry(0.85, 2.1, 0.05), woodMat);
+    bathDoorMesh.position.set(0.85 / 2, 2.1 / 2, 0);
+    bathHinge.add(bathDoorMesh);
+    scene.add(bathHinge);
+    houseManager.bathroomDoorGroup = bathHinge;
+
     // Toiture en tôle ondulée
     gableRoof(hx, hz, hw + 0.8, hd + 0.8, wallH + floorY, 0xebdaa8, { rusty: true });
 
     // ── MEUBLES DU SALON (Sud-Ouest) ──
-    // Canapé confortable
+    // Canapé confortable 3 places
     const sofaHex = 0x2563eb;
-    add(paintMat, tint(box(2.2, 0.45, 0.9, hx - 3.8, floorY + 0.25, hz + 2.8, 1), sofaHex));
-    add(paintMat, tint(box(2.2, 0.55, 0.2, hx - 3.8, floorY + 0.65, hz + 3.2, 1), sofaHex));
-    // Table basse
-    add(woodMat, box(1.3, 0.4, 0.7, hx - 3.8, floorY + 0.2, hz + 1.4, 1));
-    // Meuble TV et écran
-    add(woodMat, box(1.8, 0.55, 0.45, hx - 5.5, floorY + 0.3, hz + 1.4, 1, Math.PI / 2));
-    add(metalMat, tint(box(1.2, 0.75, 0.08, hx - 5.5, floorY + 0.95, hz + 1.4, 1, Math.PI / 2), 0x0f172a));
+    add(paintMat, tint(box(2.4, 0.45, 0.95, hx - 3.8, floorY + 0.25, hz + 2.8, 1), sofaHex));
+    add(paintMat, tint(box(2.4, 0.55, 0.22, hx - 3.8, floorY + 0.65, hz + 3.25, 1), sofaHex));
+    // Table basse en bois
+    add(woodMat, box(1.4, 0.4, 0.75, hx - 3.8, floorY + 0.2, hz + 1.4, 1));
+    // Tapis de salon
+    add(paintMat, tint(box(2.6, 0.02, 1.8, hx - 3.8, floorY + 0.02, hz + 2.1, 1), 0x7c2d12));
 
-    // ── MEUBLES DE LA CUISINE (Sud-Est) ──
+    // Meuble TV et Télévision interactive 3D
+    add(woodMat, box(2.0, 0.55, 0.5, hx - 5.5, floorY + 0.3, hz + 1.4, 1, Math.PI / 2));
+    // Cadre TV
+    add(metalMat, tint(box(1.3, 0.8, 0.08, hx - 5.5, floorY + 0.95, hz + 1.4, 1, Math.PI / 2), 0x0f172a));
+
+    // Écran TV dynamique animé (CanvasTexture)
+    const tvScreenGeo = new THREE.PlaneGeometry(1.22, 0.72);
+    const tvScreenMat = new THREE.MeshBasicMaterial({
+      map: houseManager.tv.texture,
+      toneMapped: false,
+    });
+    const tvScreenMesh = new THREE.Mesh(tvScreenGeo, tvScreenMat);
+    tvScreenMesh.position.set(hx - 5.45, floorY + 0.95, hz + 1.4);
+    tvScreenMesh.rotation.y = Math.PI / 2;
+    scene.add(tvScreenMesh);
+    houseManager.tvScreenMesh = tvScreenMesh;
+
+    // ── MEUBLES DE LA CUISINE & SALLE À MANGER (Sud-Est) ──
     // Plan de travail et évier
     add(roofConcrete, box(2.6, 0.85, 0.7, hx + 4.2, floorY + 0.45, hz + 1.6, 1, Math.PI / 2));
-    // Bouteille de gaz bleue congolaise & réchaud
+
+    // Robinet et filet d'eau animé
+    const tapGeo = new THREE.CylinderGeometry(0.015, 0.015, 0.25, 6);
+    tapGeo.translate(hx + 4.2, floorY + 0.95, hz + 1.6);
+    add(steelMat, tapGeo);
+
+    const waterGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.35, 6);
+    const waterMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.8 });
+    const waterMesh = new THREE.Mesh(waterGeo, waterMat);
+    waterMesh.position.set(hx + 4.2, floorY + 0.68, hz + 1.6);
+    waterMesh.visible = false;
+    scene.add(waterMesh);
+    houseManager.waterStreamMesh = waterMesh;
+
+    // Bouteille de gaz bleue & réchaud
     const gasBot = new THREE.CylinderGeometry(0.2, 0.2, 0.55, 8);
     gasBot.translate(hx + 3.4, floorY + 0.3, hz + 1.2);
     add(paintMat, tint(gasBot, 0x0284c7));
-    // Bidons jaunes d'eau de 20L
-    for (let b = 0; b < 2; b++) {
-      add(paintMat, tint(box(0.28, 0.42, 0.22, hx + 5.2, floorY + 0.22, hz + 2.2 + b * 0.35, 1), 0xfacc15));
+
+    // Casserole et flamme de cuisson
+    const potGeo = new THREE.CylinderGeometry(0.16, 0.16, 0.14, 8);
+    potGeo.translate(hx + 3.4, floorY + 0.68, hz + 1.2);
+    add(metalMat, potGeo);
+
+    const flameGeo = new THREE.ConeGeometry(0.08, 0.18, 6);
+    const flameMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
+    const flameMesh = new THREE.Mesh(flameGeo, flameMat);
+    flameMesh.position.set(hx + 3.4, floorY + 0.62, hz + 1.2);
+    flameMesh.visible = false;
+    scene.add(flameMesh);
+    houseManager.stoveFlameMesh = flameMesh;
+
+    // Réfrigérateur moderne blanc avec poignée
+    add(paintMat, tint(box(0.9, 1.8, 0.85, hx + 5.5, floorY + 0.9, hz + 3.4, 1), 0xf8fafc));
+    add(metalMat, tint(box(0.05, 0.45, 0.05, hx + 5.02, floorY + 1.05, hz + 3.2, 1), 0x94a3b8));
+
+    // Table à manger et 4 chaises (Salle à Manger)
+    add(woodMat, box(1.6, 0.78, 1.2, hx + 2.4, floorY + 0.39, hz + 3.6, 1));
+    for (const [dx, dz] of [[-0.9, 0], [0.9, 0], [0, -0.7], [0, 0.7]]) {
+      add(woodMat, box(0.42, 0.45, 0.42, hx + 2.4 + dx, floorY + 0.23, hz + 3.6 + dz, 1));
+      add(woodMat, box(0.42, 0.5, 0.06, hx + 2.4 + dx, floorY + 0.65, hz + 3.6 + dz + (dz === 0 ? 0.2 : 0), 1));
     }
+    // Assiettes
+    add(paintMat, tint(box(0.32, 0.03, 0.32, hx + 2.0, floorY + 0.8, hz + 3.6, 1), 0xf8fafc));
+    add(paintMat, tint(box(0.32, 0.03, 0.32, hx + 2.8, floorY + 0.8, hz + 3.6, 1), 0xf8fafc));
 
     // ── MEUBLES DE LA CHAMBRE (Nord-Ouest) ──
     // Grand lit avec matelas, oreillers et moustiquaire
@@ -503,20 +586,45 @@ export function buildCity(scene: THREE.Scene, _quality: Quality): CityResult {
     add(paintMat, tint(box(2.0, 0.2, 1.6, hx - 4.2, floorY + 0.45, hz - 3.2, 1), 0xf8fafc));
     // Cadre moustiquaire
     add(steelMat, box(2.1, 1.8, 0.04, hx - 4.2, floorY + 1.1, hz - 2.35, 1));
+    // Table de nuit et lampe
+    add(woodMat, box(0.55, 0.55, 0.55, hx - 2.8, floorY + 0.28, hz - 4.2, 1));
+    add(paintMat, tint(box(0.25, 0.35, 0.25, hx - 2.8, floorY + 0.68, hz - 4.2, 1), 0xfef08a));
     // Armoire penderie
-    add(woodMat, box(1.2, 1.9, 0.55, hx - 1.2, floorY + 1.0, hz - 4.2, 1));
+    add(woodMat, box(1.3, 2.0, 0.6, hx - 1.2, floorY + 1.0, hz - 4.2, 1));
 
     // ── MEUBLES DE LA SALLE DE BAIN (Nord-Est) ──
     // Receveur de douche carrelé
-    add(paintMat, tint(box(1.2, 0.12, 1.2, hx + 4.8, floorY + 0.08, hz - 3.8, 1), 0x0284c7));
+    add(paintMat, tint(box(1.3, 0.12, 1.3, hx + 4.8, floorY + 0.08, hz - 3.8, 1), 0x0284c7));
     // Pommeau de douche
     const showerPipe = new THREE.CylinderGeometry(0.02, 0.02, 1.8, 6);
     showerPipe.translate(hx + 5.3, floorY + 1.2, hz - 3.8);
     add(steelMat, showerPipe);
-    // Lavabo
-    add(paintMat, tint(box(0.65, 0.75, 0.45, hx + 2.2, floorY + 0.4, hz - 4.4, 1), 0xf8fafc));
 
-    // Collisions précises (murs extérieurs + cloisons laissant passer la porte)
+    // Jet d'eau de douche animé
+    const sprayGeo = new THREE.ConeGeometry(0.25, 0.7, 8);
+    const sprayMat = new THREE.MeshBasicMaterial({ color: 0x7dd3fc, transparent: true, opacity: 0.6 });
+    const sprayMesh = new THREE.Mesh(sprayGeo, sprayMat);
+    sprayMesh.position.set(hx + 4.8, floorY + 1.6, hz - 3.8);
+    sprayMesh.rotation.x = Math.PI;
+    sprayMesh.visible = false;
+    scene.add(sprayMesh);
+    houseManager.showerSprayMesh = sprayMesh;
+
+    // Lavabo & miroir
+    add(paintMat, tint(box(0.65, 0.75, 0.45, hx + 2.2, floorY + 0.4, hz - 4.4, 1), 0xf8fafc));
+    add(glassMat, tint(box(0.6, 0.8, 0.03, hx + 2.2, floorY + 1.3, hz - 4.48, 1), 0x93c5fd));
+
+    // Toilettes modernes avec réservoir
+    add(paintMat, tint(box(0.45, 0.45, 0.55, hx + 2.0, floorY + 0.23, hz - 2.2, 1), 0xf8fafc));
+    add(paintMat, tint(box(0.45, 0.45, 0.22, hx + 2.0, floorY + 0.65, hz - 2.45, 1), 0xf8fafc));
+
+    // Point Light d'ambiance pour l'éclairage de la maison
+    const ceilingLight = new THREE.PointLight(0xfff5ea, 1.4, 18);
+    ceilingLight.position.set(hx, floorY + 2.8, hz);
+    scene.add(ceilingLight);
+    houseManager.ceilingLight = ceilingLight;
+
+    // Collisions précises (murs extérieurs + cloisons laissant passer les portes)
     colliders.push({ x: hx - doorW / 2 - frontHalf / 2, z: hz + hd / 2, hw: frontHalf / 2, hd: wallThick });
     colliders.push({ x: hx + doorW / 2 + frontHalf / 2, z: hz + hd / 2, hw: frontHalf / 2, hd: wallThick });
     colliders.push({ x: hx, z: hz - hd / 2, hw: hw / 2, hd: wallThick });
@@ -540,6 +648,7 @@ export function buildCity(scene: THREE.Scene, _quality: Quality): CityResult {
       rooms: [
         { name: "Salon", x: hx - 3.5, z: hz + 2.2, icon: "🛋️" },
         { name: "Cuisine", x: hx + 3.5, z: hz + 2.2, icon: "🍳" },
+        { name: "Salle à manger", x: hx + 2.4, z: hz + 3.6, icon: "🍽️" },
         { name: "Chambre", x: hx - 3.5, z: hz - 2.5, icon: "🛏️" },
         { name: "Salle de bain", x: hx + 3.5, z: hz - 2.5, icon: "🚿" },
       ],

@@ -164,6 +164,7 @@ export interface Rig {
     cheer: number;
     talk: number;
   };
+  expression?: "neutral" | "smile" | "surprise" | "talk";
   skinMeshes: THREE.Mesh[];
   topMeshes: THREE.Mesh[];
   radius: number;
@@ -402,6 +403,7 @@ export function buildCharacter(look: CharacterLook, lod: "high" | "low" = "high"
     mat(lipColor, 0.45)
   );
   mouthMesh.position.set(0, headR - 0.058, headR * 0.93);
+  (mouthMesh as unknown as { _baseY: number })._baseY = headR - 0.058;
   head.add(mouthMesh);
 
   // Menton humain sculpté
@@ -707,15 +709,43 @@ export function animateRig(
     rig.blinkTimer = 2.5 + Math.random() * 3.5;
   }
   const isBlinking = rig.blinkTimer < 0.12;
-  rig.eyeL.scale.y = isBlinking ? 0.1 : 0.85;
-  rig.eyeR.scale.y = isBlinking ? 0.1 : 0.85;
 
-  // Animation de parole
-  if (b.talk > 0.05) {
-    const talkScale = 1 + Math.sin(time * 16) * 0.4 * b.talk;
-    rig.mouth.scale.y = talkScale;
+  // Expressions faciales : sourire, surprise, parole, neutre
+  const expr =
+    rig.expression ??
+    (b.cheer > 0.15 || b.wave > 0.15 || b.handover > 0.15
+      ? "smile"
+      : b.talk > 0.15
+      ? "talk"
+      : "neutral");
+  const mouthBaseY =
+    (rig.mouth as unknown as { _baseY?: number })._baseY ?? rig.mouth.position.y;
+
+  if (expr === "smile") {
+    // Sourire chaleureux : lèvres étirées vers le haut, yeux plissés
+    rig.mouth.scale.set(1.28, 0.7, 1.0);
+    rig.mouth.position.y = mouthBaseY + 0.005;
+    rig.eyeL.scale.set(0.95, isBlinking ? 0.1 : 0.65, 0.95);
+    rig.eyeR.scale.set(0.95, isBlinking ? 0.1 : 0.65, 0.95);
+  } else if (expr === "surprise") {
+    // Surprise légère : bouche ouverte en "O", yeux écarquillés
+    rig.mouth.scale.set(0.85, 1.6, 1.15);
+    rig.mouth.position.y = mouthBaseY - 0.003;
+    rig.eyeL.scale.set(1.22, isBlinking ? 0.1 : 1.25, 1.22);
+    rig.eyeR.scale.set(1.22, isBlinking ? 0.1 : 1.25, 1.22);
+  } else if (expr === "talk" || b.talk > 0.05) {
+    // Animation de parole rythmée
+    const talkScale = 1 + Math.sin(time * 16) * 0.45 * Math.max(0.6, b.talk);
+    rig.mouth.scale.set(1.05, talkScale, 1.0);
+    rig.mouth.position.y = mouthBaseY;
+    rig.eyeL.scale.set(1.0, isBlinking ? 0.1 : 0.85, 1.0);
+    rig.eyeR.scale.set(1.0, isBlinking ? 0.1 : 0.85, 1.0);
   } else {
-    rig.mouth.scale.y = 1;
+    // Expression neutre naturelle
+    rig.mouth.scale.set(1.0, 1.0, 1.0);
+    rig.mouth.position.y = mouthBaseY;
+    rig.eyeL.scale.set(1.0, isBlinking ? 0.1 : 0.85, 1.0);
+    rig.eyeR.scale.set(1.0, isBlinking ? 0.1 : 0.85, 1.0);
   }
 
   // Foulée proportionnelle à la distance parcourue réelle

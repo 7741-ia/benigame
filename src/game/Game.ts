@@ -965,12 +965,18 @@ export class Game {
         if (c.t >= 1) c.state = "wait";
       } else if (c.state === "wait") {
         c.waitT -= dt;
-        // face au joueur, remise du colis ou joie
+        // face au joueur, remise du colis ou joie avec sourire
         const target = Math.atan2(this.pos.x - c.mesh.position.x, this.pos.y - c.mesh.position.z);
         c.mesh.rotation.y = this.turnTo(c.mesh.rotation.y, target, 5, dt);
+        c.rig.expression = "smile";
+        if (!(c as any)._thanked) {
+          (c as any)._thanked = true;
+          this.say(c.mesh, "Merci !", 2.8);
+        }
         animateRig(c.rig, dt, c.cheer ? "cheer" : "handover", 0);
         if (c.waitT <= 0) {
           c.state = "leave";
+          c.rig.expression = "neutral";
           c.t = 0;
         }
       } else {
@@ -3073,23 +3079,22 @@ export class Game {
         new THREE.Vector3((this.pos.x + this.deliverPos.x) / 2, 1.4, (this.pos.y + this.deliverPos.y) / 2)
       );
     } else {
-      // le client remercie (réaction variée + bulle « Merci ! ») puis rentre chez lui
+      // Le client regarde le livreur, reçoit le colis, sourit et fait un geste
       const npc = this.clientNpc;
       const rig = this.clientRig!;
       this.clientNpc = null;
       this.clientRig = null;
-      const reactions: { text: string; cheer: boolean }[] = [
-        { text: "Merci !", cheer: false },
-        { text: "Bonne journée !", cheer: false },
-        { text: "Merci beaucoup !", cheer: true },
-        { text: "Asante sana !", cheer: false },
-        { text: "Super, merci !", cheer: true },
-        { text: "À la prochaine !", cheer: false },
-      ];
-      const r = reactions[Math.floor(Math.random() * reactions.length)];
-      this.say(npc, r.text, 2.8);
-      // « sourire » : la tête se relève vers le livreur pendant le remerciement
+
+      // Le PNJ regarde le livreur
+      npc.lookAt(this.pos.x, npc.position.y, this.pos.y);
+
+      // Expression faciale : sourire
+      rig.expression = "smile";
       rig.head.rotation.x = -0.12;
+
+      // Affichage au-dessus de la tête : "Merci !" qui disparaît en fondu
+      this.say(npc, "Merci !", 3.0);
+
       const home = new THREE.Vector2(npc.position.x, npc.position.z).add(
         new THREE.Vector2(this.deliverDoor.x - this.deliverPos.x, this.deliverDoor.y - this.deliverPos.y).normalize().multiplyScalar(2.2)
       );
@@ -3100,8 +3105,8 @@ export class Game {
         to: new THREE.Vector2(npc.position.x, npc.position.z),
         t: 1,
         state: "wait",
-        waitT: r.cheer ? 2.4 : 1.8,
-        cheer: r.cheer,
+        waitT: 2.2,
+        cheer: true,
       });
     }
     // le colis disparaît de l'arrière de la moto

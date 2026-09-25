@@ -176,13 +176,52 @@ export class AudioEngine {
   }
 
   // ── MOTEUR & VÉHICULE ──
+  private engineState: "off" | "idle" | "running" = "off";
+  private currentVehicleType: "moto" | "van" | "car" = "moto";
+  private engineStoppingTimeout: number | null = null;
+
   startEngine(vehicleType: "moto" | "van" | "car" = "moto") {
     this.ensure();
-    if (!this.ctx || this.engineOsc || !this.sfxBus) return;
+    if (!this.ctx || !this.sfxBus) return;
+    this.currentVehicleType = vehicleType;
+
+    if (this.engineStoppingTimeout !== null) {
+      window.clearTimeout(this.engineStoppingTimeout);
+      this.engineStoppingTimeout = null;
+    }
+
+    if (this.engineOsc && this.engineGain) {
+      // Déjà actif, on remet le gain normal
+      const t = this.ctx.currentTime;
+      this.engineGain.gain.cancelScheduledValues(t);
+      this.engineGain.gain.setTargetAtTime(this.soundEnabled ? 0.04 : 0, t, 0.08);
+      this.engineState = "idle";
+      return;
+    }
+
     const ctx = this.ctx;
+    const t = ctx.currentTime;
+
+    // Son de démarreur (starter / ignition)
+    try {
+      const crankOsc = ctx.createOscillator();
+      const crankGain = ctx.createGain();
+      crankOsc.type = "sawtooth";
+      crankOsc.frequency.setValueAtTime(32, t);
+      crankOsc.frequency.linearRampToValueAtTime(85, t + 0.18);
+      crankGain.gain.setValueAtTime(this.soundEnabled ? 0.07 : 0, t);
+      crankGain.gain.exponentialRampToValueAtTime(0.001, t + 0.22);
+      crankOsc.connect(crankGain);
+      crankGain.connect(this.sfxBus);
+      crankOsc.start(t);
+      crankOsc.stop(t + 0.23);
+    } catch {
+      /* ignore */
+    }
 
     this.engineGain = ctx.createGain();
-    this.engineGain.gain.value = 0.03;
+    this.engineGain.gain.setValueAtTime(0.0001, t);
+    this.engineGain.gain.linearRampToValueAtTime(this.soundEnabled ? 0.035 : 0, t + 0.2);
 
     this.engineFilter = ctx.createBiquadFilter();
     this.engineFilter.type = "lowpass";
@@ -201,28 +240,99 @@ export class AudioEngine {
     this.engineFilter.connect(this.engineGain);
     this.engineGain.connect(this.sfxBus);
 
-    this.engineOsc.start();
-    this.engineOsc2.start();
+    try {
+      this.engineOsc.start(t + 0.05);
+      this.engineOsc2.start(t + 0.05);
+      this.engineState = "idle";
+    } catch {
+      this.engineOsc = null;
+      this.engineOsc2 = null;
+    }
   }
 
-  stopEngine() {
+  stopEngine(immediate = false) {
+    if (!this.engineOsc || !this.engineGain || !this.ctx) {
+      this.engineState = "off";
+      return;
+    }
+
+    const ctx = this.ctx;
+    const t = ctx.currentTime;
+    this.engineState = "off";
+
+    if (immediate) {
+      try {
+        this.engineGain.gain.cancelScheduledValues(t);
+        this.engineGain.gain.setValueAtTime(0, t);
+        this.engineOsc.stop();
+        this.engineOsc2?.stop();
+      } catch {
+        /* ignore */
+      }
+      this.engineOsc = null;
+      this.engineOsc2 = null;
+      this.engineGain = null;
+      this.engineFilter = null;
+      return;
+    }
+
+    // Arrêt progressif sans coupure brutale
     try {
-      this.engineOsc?.stop();
-      this.engineOsc2?.stop();
+      this.engineGain.gain.cancelScheduledValues(t);
+      this.engineGain.gain.setTargetAtTime(0, t, 0.08);
     } catch {
       /* ignore */
     }
+
+    const osc1 = this.engineOsc;
+    const osc2 = this.engineOsc2;
+    const gain = this.engineGain;
+    const filter = this.engineFilter;
+
     this.engineOsc = null;
     this.engineOsc2 = null;
     this.engineGain = null;
     this.engineFilter = null;
+
+    if (this.engineStoppingTimeout !== null) {
+      window.clearTimeout(this.engineStoppingTimeout);
+    }
+
+    this.engineStoppingTimeout = window.setTimeout(() => {
+      try {
+        osc1?.stop();
+        osc2?.stop();
+        gain?.disconnect();
+        filter?.disconnect();
+      } catch {
+        /* ignore */
+      }
+    }, 120);
   }
 
-  updateEngine(speed01: number, vehicleType: "moto" | "van" | "car" = "moto", isAccelerating = false) {
-    if (!this.ctx || !this.engineOsc || !this.engineGain || !this.engineFilter) return;
+  updateEngine(
+    speed01: number,
+    vehicleType: "moto" | "van" | "car" = "moto",
+    isAccelerating = false,
+    distanceToPlayer = 0
+  ) {
+    // Si trop éloigné ou joueur à pied loin du véhicule, couper le son
+    if (distanceToPlayer > 12) {
+      if (this.engineState !== "off") this.stopEngine();
+      return;
+    }
+
+    if (!this.ctx || !this.engineOsc || !this.engineGain || !this.engineFilter) {
+      // Ne pas auto-démarrer si moteur coupé
+      return;
+    }
+
     const t = this.ctx.currentTime;
     const isMoto = vehicleType === "moto";
     const isVan = vehicleType === "van";
+
+    // Atténuation selon la distance si le joueur n'est pas sur le véhicule
+    const distAtten = distanceToPlayer > 0 ? Math.max(0, 1 - distanceToPlayer / 12) : 1;
 
     const baseMin = isMoto ? 62 : isVan ? 36 : 45;
     const baseMax = isMoto ? 240 : isVan ? 165 : 190;
@@ -237,8 +347,120 @@ export class AudioEngine {
     const cutoff = (isMoto ? 600 : 380) + speed01 * (isMoto ? 2500 : 1800);
     this.engineFilter.frequency.setTargetAtTime(cutoff, t, 0.08);
 
-    const gainVal = 0.03 + speed01 * 0.16 + (isAccelerating ? 0.03 : 0);
+    const gainVal = (0.028 + speed01 * 0.15 + (isAccelerating ? 0.03 : 0)) * distAtten;
     this.engineGain.gain.setTargetAtTime(this.soundEnabled ? gainVal : 0, t, 0.09);
+    this.engineState = speed01 > 0.05 ? "running" : "idle";
+  }
+
+  // ── SONS DE LA MAISON & DU QUOTIDIEN ──
+  tvSwitch() {
+    this.ensure();
+    if (!this.ctx || !this.sfxBus || !this.soundEnabled) return;
+    const ctx = this.ctx;
+    const t = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(780, t);
+    osc.frequency.exponentialRampToValueAtTime(140, t + 0.08);
+    gain.gain.setValueAtTime(0.06, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.09);
+    osc.connect(gain);
+    gain.connect(this.sfxBus);
+    osc.start(t);
+    osc.stop(t + 0.1);
+  }
+
+  doorInteract(open = true) {
+    this.ensure();
+    if (!this.ctx || !this.sfxBus || !this.soundEnabled) return;
+    const ctx = this.ctx;
+    const t = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = open ? "sawtooth" : "triangle";
+    osc.frequency.setValueAtTime(open ? 180 : 90, t);
+    osc.frequency.exponentialRampToValueAtTime(open ? 95 : 45, t + 0.15);
+    gain.gain.setValueAtTime(0.08, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+    osc.connect(gain);
+    gain.connect(this.sfxBus);
+    osc.start(t);
+    osc.stop(t + 0.2);
+  }
+
+  waterTap(flowing = true) {
+    this.ensure();
+    if (!this.ctx || !this.sfxBus || !this.soundEnabled) return;
+    if (!flowing) {
+      this.click();
+      return;
+    }
+    const ctx = this.ctx;
+    const t = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(540, t);
+    osc.frequency.linearRampToValueAtTime(420, t + 0.3);
+    gain.gain.setValueAtTime(0.04, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+    osc.connect(gain);
+    gain.connect(this.sfxBus);
+    osc.start(t);
+    osc.stop(t + 0.36);
+  }
+
+  shower() {
+    this.waterTap(true);
+  }
+
+  fridgeInteract() {
+    this.ensure();
+    if (!this.ctx || !this.sfxBus || !this.soundEnabled) return;
+    const ctx = this.ctx;
+    const t = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(120, t);
+    osc.frequency.exponentialRampToValueAtTime(60, t + 0.15);
+    gain.gain.setValueAtTime(0.07, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+    osc.connect(gain);
+    gain.connect(this.sfxBus);
+    osc.start(t);
+    osc.stop(t + 0.19);
+  }
+
+  cookSizzle() {
+    this.ensure();
+    if (!this.ctx || !this.sfxBus || !this.soundEnabled) return;
+    const ctx = this.ctx;
+    const t = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "triangle";
+    osc.frequency.setValueAtTime(240, t);
+    osc.frequency.linearRampToValueAtTime(320, t + 0.4);
+    gain.gain.setValueAtTime(0.05, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.45);
+    osc.connect(gain);
+    gain.connect(this.sfxBus);
+    osc.start(t);
+    osc.stop(t + 0.46);
+  }
+
+  eatSound() {
+    this.coin();
+  }
+
+  sitDown() {
+    this.vehicleExit();
+  }
+
+  lightSwitch() {
+    this.click();
   }
 
   /** Bruit de crissement / freinage prononcé */
