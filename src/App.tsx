@@ -34,6 +34,7 @@ import CityMap from "./components/CityMap";
 import Phone from "./components/Phone";
 import ProfilePanel from "./components/ProfilePanel";
 import HomePanel from "./components/HomePanel";
+import { PWAInstallButton, OfflineIndicator } from "./components/PWAInstallButton";
 
 const defaultHud: HudState = {
   phase: "menu",
@@ -46,7 +47,7 @@ const defaultHud: HudState = {
   timeTotal: 1,
   hasPackage: false,
   deliveriesDone: 0,
-  deliveriesNeeded: 4,
+  deliveriesNeeded: 20,
   playerX: 0,
   playerZ: 0,
   playerHeading: 0,
@@ -175,7 +176,7 @@ export default function App() {
       },
       onLevelComplete: (level) => {
         setCareer((current) => {
-          const next = { ...current, highestLevel: Math.max(current.highestLevel, Math.min(5, level + 1)) };
+          const next = { ...current, highestLevel: Math.max(current.highestLevel, Math.min(3, level + 1)) };
           saveProgress(next);
           return next;
         });
@@ -319,11 +320,13 @@ export default function App() {
   }, []);
 
   const openPhone = useCallback(() => {
+    audio.openPhone();
     gameRef.current?.pause();
     setPhoneOpen(true);
   }, []);
 
   const closePhone = useCallback(() => {
+    audio.closePhone();
     setPhoneOpen(false);
     if (gameRef.current?.phase === "paused") gameRef.current.resume();
   }, []);
@@ -464,6 +467,7 @@ export default function App() {
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-slate-900 font-sans text-white select-none">
       <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />
+      <OfflineIndicator />
 
       {/* ================= IN-GAME HUD ================= */}
       {(phase === "playing" || phase === "paused") && (
@@ -833,7 +837,11 @@ export default function App() {
               Progression : niveau {career.highestLevel} · {career.missionsCompleted} livraisons terminées
             </div>
 
-            <div className="mt-5 space-y-3">
+            <div className="mt-3 flex justify-center">
+              <PWAInstallButton />
+            </div>
+
+            <div className="mt-4 space-y-3">
               <button
                 onClick={play}
                 className="w-full rounded-2xl bg-gradient-to-r from-emerald-400 to-green-600 py-4 text-xl font-black shadow-lg shadow-emerald-900/50 transition-transform active:scale-95"
@@ -978,8 +986,19 @@ export default function App() {
         <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
           <div className="w-full max-w-lg space-y-4 rounded-3xl bg-gradient-to-b from-slate-800 to-slate-900 p-6 text-center ring-1 ring-white/10">
             <div className="text-5xl">🎉</div>
-            <h2 className="text-3xl font-black text-emerald-300">Journée terminée !</h2>
-            <p className="text-sm text-white/70">Que souhaites-tu faire maintenant ?</p>
+            <h2 className="text-3xl font-black text-emerald-300">NIVEAU {hud.level} TERMINÉ !</h2>
+            <p className="text-sm text-white/80">
+              Félicitations ! Tu as complété les 20 livraisons du Niveau {hud.level}.
+            </p>
+            {hud.level < 3 ? (
+              <div className="rounded-xl bg-sky-500/20 py-1.5 px-3 text-xs font-bold text-sky-300 ring-1 ring-sky-400/30">
+                🚀 NIVEAU {hud.level + 1} DÉBLOQUÉ (0 / 20 missions)
+              </div>
+            ) : (
+              <div className="rounded-xl bg-amber-500/20 py-1.5 px-3 text-xs font-bold text-amber-300 ring-1 ring-amber-400/30">
+                🏆 TOUS LES NIVEAUX COMPLÉTÉS (60 / 60 missions) !
+              </div>
+            )}
             <div className="flex justify-around text-center">
               <div>
                 <div className="text-2xl font-black text-amber-300">${hud.money}</div>

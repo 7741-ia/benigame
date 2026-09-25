@@ -4,10 +4,11 @@ import { audio } from "./audio";
 import { GRID_LINES, CELL, ROAD, WORLD, HALF } from "./constants";
 import type { HudState, Upgrades } from "./types";
 import { getVehicle, type Vehicle } from "./vehicles";
-import { DISTRICTS, POIS, landmarkWorld, type Landmark, type Poi, type PoiType } from "./districts";
+import { DISTRICTS, POIS, landmarkWorld, getDistrictAt, type Landmark, type Poi, type PoiType } from "./districts";
+import { addMissionRecord } from "./storage";
 import { buildSign, buildSpeedBump, buildPothole, buildStoneObstacle } from "./road";
 import type { PlayerProfile } from "./life";
-import { buildCity, type CityResult } from "./city";
+import { buildCity, type CityResult, type VisitableBuilding } from "./city";
 import { buildKiosk } from "./props";
 import { Environment, type Quality, type Weather } from "./environment";
 import {
@@ -18,6 +19,7 @@ import {
   seededLook,
   makeSpeechBubble,
   RIG_SCALE,
+  DEFAULT_MOVEMENT,
   type Rig,
   type Pose,
   type CharacterLook,
@@ -188,7 +190,7 @@ export class Game {
   private timeLeft = 0;
   private timeTotal = 0;
   private deliveriesDone = 0;
-  private deliveriesNeeded = 4;
+  private deliveriesNeeded = 20; // 20 missions par niveau
   private combo = 1;
   private shake = 0;
   private crashCooldown = 0;
@@ -276,6 +278,10 @@ export class Game {
   private clientNpc: THREE.Group | null = null;
   private clientWave = 0;
   private idlePeds: THREE.Group[] = [];
+  private stepTimer = 0;
+  private runToggled = false;
+  private currentBuilding: VisitableBuilding | null = null;
+  private currentRoom: { name: string; x: number; z: number; icon: string } | null = null;
 
   constructor(canvas: HTMLCanvasElement, cb: Callbacks) {
     this.canvas = canvas;
@@ -1457,7 +1463,7 @@ export class Game {
       this.money = startMoney;
     }
     this.deliveriesDone = 0;
-    this.deliveriesNeeded = 3 + level;
+    this.deliveriesNeeded = 20; // 20 livraisons par niveau (3 niveaux = 60 livraisons au total)
     this.combo = 1;
     this.speed = 0;
     this.fatigue = 0;
@@ -1658,7 +1664,7 @@ export class Game {
       this.packageMesh.visible = false;
       this.walkerPackage.visible = this.hasPackage;
       audio.updateEngine(0);
-      audio.click();
+      audio.vehicleExit();
     } else {
       const dx = this.pos.x - this.bike.position.x;
       const dz = this.pos.y - this.bike.position.z;
@@ -1669,7 +1675,7 @@ export class Game {
       this.mountFrom.set(this.pos.x, 0, this.pos.y);
       this.mountTo.copy(this.seatWorld()).setY(0.55);
       this.walkerPackage.visible = false;
-      audio.click();
+      audio.vehicleEnter();
     }
     this.emitHud();
     return true;
@@ -1879,7 +1885,7 @@ export class Game {
         rot = side > 0 ? Math.PI : 0;
         pos.x = this.awayFromCross(pos.x);
       }
-      const color = {
+      const colorMap: Record<PoiType, number> = {
         shop: 0xffb703,
         restaurant: 0x80ed99,
         kiosk: 0x48cae4,
@@ -1887,7 +1893,11 @@ export class Game {
         market: 0xf59e0b,
         clothing: 0xfacc15,
         leisure: 0xc084fc,
-      }[poi.type];
+        pharmacy: 0x10b981,
+        fuel: 0xf97316,
+        admin: 0x64748b,
+      };
+      const color = colorMap[poi.type] ?? 0xffb703;
       const g = buildKiosk(this.scene, pos.x, pos.y, rot, poi.type, poi.name, color);
       this.poiSigns.push(g.signMat);
       if (this.quality === "high") {
@@ -1917,10 +1927,56 @@ export class Game {
     }));
   }
 
+  toggleRun() {
+    this.runToggled = !this.runToggled;
+    return this.runToggled;
+  }
+
   interact(): PoiType | null {
-    if (this.phase !== "playing" || !this.nearPoi) return null;
+    if (this.phase !== "playing") return null;
     if (this.deliveryStage === "handover" || this.mountT > 0) return null;
-    if (Math.abs(this.speed) > 3) return null; // il faut s'arrêter pour faire ses courses
+    if (Math.abs(this.speed) > 3) return null;
+
+    // Interaction dans les intérieurs 3D de bâtiments visitables
+    if (this.currentBuilding) {
+      audio.click();
+      if (this.currentBuilding.id === "home") {
+        if (this.currentRoom?.name === "Chambre") {
+          this.fatigue = 0;
+          if (this.env) this.env.setHour((this.env.hour + 6) % 24);
+          audio.levelup();
+        } else if (this.currentRoom?.name === "Cuisine") {
+          this.hunger = 0;
+          this.fatigue = Math.max(0, this.fatigue - 15);
+          audio.coin();
+        } else if (this.currentRoom?.name === "Salle de bain") {
+          this.fatigue = Math.max(0, this.fatigue - 20);
+          audio.coin();
+        } else {
+          this.fatigue = Math.max(0, this.fatigue - 10);
+          audio.coin();
+        }
+        this.emitHud();
+        return "home";
+      } else if (this.currentBuilding.id === "restaurant") {
+        this.eatAtRestaurant();
+        return "restaurant";
+      } else if (this.currentBuilding.id === "shop") {
+        this.shopReturn = "playing";
+        this.phase = "garage";
+        audio.updateEngine(0);
+        this.emitHud();
+        return "shop";
+      } else if (this.currentBuilding.id === "pharmacy") {
+        this.fatigue = 0;
+        this.hunger = Math.max(0, this.hunger - 30);
+        audio.levelup();
+        this.emitHud();
+        return "pharmacy";
+      }
+    }
+
+    if (!this.nearPoi) return null;
     const poi = this.nearPoi;
     audio.click();
     if (poi.type === "shop") {
@@ -2121,6 +2177,17 @@ export class Game {
     asphalt.metalness = wet * (this.quality === "low" ? 0.08 : 0.28);
     this.city.roadMaterials[1].roughness = 0.98 - wet * 0.4;
     this.renderer.toneMappingExposure = 1.18 - night * 0.14;
+
+    if (this.phase === "playing") {
+      const currentHour = parseInt(this.env.clockLabel().split(":")[0], 10) || 12;
+      const isNearMarket = Math.abs(this.pos.x) < 50 && Math.abs(this.pos.y) < 50;
+      audio.updateAmbience({
+        hour: currentHour,
+        speed: Math.abs(this.speed),
+        nearMarket: isNearMarket,
+        weather: this.env.weather,
+      });
+    }
   }
 
   // ── régulateur de vitesse ──
@@ -2557,12 +2624,12 @@ export class Game {
     move = Math.max(-1, Math.min(1, move + this.touchThrottle));
     steer = Math.max(-1, Math.min(1, steer + this.touchSteer));
 
-    const running = (this.keys["shift"] || this.touchBrake) && move > 0;
-    // vitesses réalistes : marche 1.5 m/s, course 4.5 m/s ; accélération progressive (pas de départ instantané)
-    const targetSpeed = move * (running ? 4.5 : 1.55) * (1 - this.fatigue * 0.003);
-    this.walkVel += (targetSpeed - this.walkVel) * Math.min(1, dt * 9);
-    // rotation plus lente en courant (inertie)
-    this.walkerHeading -= steer * (running ? 2.2 : 3.0) * dt;
+    const running = (this.keys["shift"] || this.touchBrake || this.runToggled) && move > 0;
+    // Déplacements physiques réalistes : marche naturelle et course rapide
+    const targetSpeed = move * (running ? DEFAULT_MOVEMENT.runSpeed : DEFAULT_MOVEMENT.walkSpeed) * (1 - this.fatigue * 0.003);
+    const accelRate = (move !== 0) ? DEFAULT_MOVEMENT.acceleration : DEFAULT_MOVEMENT.deceleration;
+    this.walkVel += (targetSpeed - this.walkVel) * Math.min(1, dt * accelRate);
+    this.walkerHeading -= steer * (running ? DEFAULT_MOVEMENT.turnSpeedRun : DEFAULT_MOVEMENT.turnSpeedWalk) * dt;
     const fx = Math.sin(this.walkerHeading);
     const fz = Math.cos(this.walkerHeading);
     let nx = this.pos.x + fx * this.walkVel * dt;
@@ -2616,6 +2683,40 @@ export class Game {
     this.pos.set(nx, nz);
     this.walker.position.set(nx, 0, nz);
     this.walker.rotation.y = this.walkerHeading;
+
+    // Détection des pas sonores
+    if (moved > 0.001) {
+      this.stepTimer -= dt;
+      if (this.stepTimer <= 0) {
+        this.stepTimer = running ? 0.30 : 0.48;
+        const isDirt = Math.abs(nx) > 175 || Math.abs(nz) > 175;
+        audio.step(isDirt ? "dirt" : "asphalt", running);
+      }
+    }
+
+    // Détection des bâtiments visitables et pièces intérieures
+    this.currentBuilding = null;
+    this.currentRoom = null;
+    if (this.city.visitableBuildings) {
+      for (const vb of this.city.visitableBuildings) {
+        if (nx >= vb.bounds.minX && nx <= vb.bounds.maxX && nz >= vb.bounds.minZ && nz <= vb.bounds.maxZ) {
+          this.currentBuilding = vb;
+          if (vb.rooms) {
+            let closestRoom = null;
+            let closestDist = 5.0;
+            for (const rm of vb.rooms) {
+              const d = Math.hypot(nx - rm.x, nz - rm.z);
+              if (d < closestDist) {
+                closestDist = d;
+                closestRoom = rm;
+              }
+            }
+            if (closestRoom) this.currentRoom = closestRoom;
+          }
+          break;
+        }
+      }
+    }
 
     // animation : la foulée suit la distance réellement parcourue (aucun glissement)
     let pose: Pose = moved > 0.002 ? (running ? "run" : "walk") : "idle";
@@ -3013,21 +3114,47 @@ export class Game {
     const sy = (-world.y * 0.5 + 0.5) * this.canvas.clientHeight;
     this.cb.onDelivery(reward, this.combo, sx, sy);
 
+    // Sons de livraison et de remerciement du client
+    audio.deliver();
+    audio.clientThank();
+
+    // Enregistrement de la vraie mission dans le Journal des Missions
+    const currentDistrictName = getDistrictAt(this.deliverPos.x, this.deliverPos.y);
+    addMissionRecord({
+      level: this.level,
+      missionNumber: this.deliveriesDone,
+      destination: this.deliverLabel || "Destinataire à Beni",
+      district: currentDistrictName,
+      reward,
+      status: "Terminée",
+      time: this.env.clockLabel(),
+    });
+
     this.fatigue = Math.max(0, this.fatigue - 5); // courte pause à la remise
     this.hasPackage = false;
     this.deliverMarker.visible = false;
     this.pickupMarker.visible = false;
     if (this.deliveriesDone >= this.deliveriesNeeded) {
-      // journée terminée : écran de choix (le temps ne court plus)
+      // 20 livraisons terminées pour ce niveau
       this.freeRoam = true;
       this.timeLeft = 0;
-      this.phase = "levelup";
-      audio.levelup();
       audio.updateEngine(0);
-      this.emitHud();
-      this.cb.onLevelComplete(this.level);
+      audio.levelup();
+
+      if (this.level >= 3) {
+        // Niveau 3 terminé = Victoire totale des 60 missions !
+        this.phase = "victory";
+        this.emitHud();
+        this.cb.onVictory(this.score, this.money);
+      } else {
+        // Fin de niveau 1 ou 2 : déblocage du niveau suivant
+        this.phase = "levelup";
+        this.emitHud();
+        this.cb.onLevelComplete(this.level);
+      }
     } else {
       // livraison réussie : on laisse le joueur choisir la suite, sans compte à rebours
+      audio.missionComplete();
       this.freeRoam = true;
       this.timeLeft = 0;
       this.deliveryChoice = true;
@@ -3137,16 +3264,38 @@ export class Game {
       weather: this.env ? this.env.weather : "sunny",
       quality: this.quality,
       deliveryStage: this.deliveryStage,
+      running: (this.keys["shift"] || this.touchBrake || this.runToggled) && Math.abs(this.walkVel) > 0.2,
+      buildingName: this.currentBuilding ? this.currentBuilding.name : undefined,
+      interiorRoom: this.currentRoom ? this.currentRoom.name : undefined,
       deliveryPrompt:
-        this.freeRoam || !this.hasPackage
-          ? ""
-          : this.deliveryStage === "handover"
-            ? "Remettre le colis au client"
-            : this.deliveryStage === "arrived"
-              ? this.playerMode === "vehicle"
-                ? "Client en vue : gare-toi et descends (F)"
-                : "Rejoins le client devant sa porte"
-              : "",
+        this.currentBuilding
+          ? this.currentBuilding.id === "home"
+            ? this.currentRoom?.name === "Chambre"
+              ? "Appuyer sur [E] pour dormir et récupérer"
+              : this.currentRoom?.name === "Cuisine"
+                ? "Appuyer sur [E] pour cuisiner un repas"
+                : this.currentRoom?.name === "Salle de bain"
+                  ? "Appuyer sur [E] pour prendre une douche"
+                  : this.currentRoom?.name === "Salon"
+                    ? "Appuyer sur [E] pour vous asseoir au salon"
+                    : "Maison du joueur (Masiani)"
+            : this.currentBuilding.id === "restaurant"
+              ? "Appuyer sur [E] pour commander chez Mama Léontine"
+              : this.currentBuilding.id === "shop"
+                ? "Appuyer sur [E] pour faire vos achats (Kivu Express)"
+                : this.currentBuilding.id === "pharmacy"
+                  ? "Appuyer sur [E] pour acheter des soins médicaux"
+                  : ""
+          : (this.freeRoam || !this.hasPackage)
+            ? ""
+            : this.deliveryStage === "handover"
+              ? "Remettre le colis au client"
+              : this.deliveryStage === "arrived"
+                ? this.playerMode === "vehicle"
+                  ? "Client en vue : gare-toi et descends (F)"
+                  : "Rejoins le client devant sa porte"
+                : "",
+      currentDistrict: getDistrictAt(this.pos.x, this.pos.y),
       homeRoom: this.homeRoom,
     });
   }

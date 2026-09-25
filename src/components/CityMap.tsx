@@ -28,6 +28,9 @@ const poiActivities: Record<PoiType, string> = {
   market: "Acheter des ingrédients pour cuisiner",
   clothing: "Changer de tenue et acheter des accessoires",
   leisure: "Rencontrer des amis, danser et participer aux événements",
+  pharmacy: "Acheter des soins médicaux et récupérer de la santé",
+  fuel: "Faire le plein de carburant et entretenir le véhicule",
+  admin: "Démarches administratives et services de la mairie",
 };
 
 const colorFor = (kind: string) => {

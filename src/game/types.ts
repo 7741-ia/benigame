@@ -51,11 +51,15 @@ export interface HudState {
   cruiseTarget: number; // km/h
   cameraView: "exterieure" | "rapprochee" | "conduite";
   clock: string; // heure du jeu HH:MM
-  weather: "sunny" | "cloudy" | "rain";
+  weather: "sunny" | "cloudy" | "rain" | "fog";
   quality: "low" | "medium" | "high";
   deliveryStage: "drive" | "arrived" | "handover";
   deliveryPrompt: string;
   homeRoom: "outside" | "bedroom" | "bathroom" | "living" | "dining" | "kitchen";
+  running?: boolean;
+  buildingName?: string;
+  interiorRoom?: string;
+  currentDistrict?: string;
 }
 
 export interface Upgrades {

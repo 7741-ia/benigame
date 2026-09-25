@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { makeClouds, makeRainStreak } from "./textures";
 
-export type Weather = "sunny" | "cloudy" | "rain";
+export type Weather = "sunny" | "cloudy" | "rain" | "fog";
 export type Quality = "low" | "medium" | "high";
 
 interface SkyKey {
@@ -14,17 +14,17 @@ interface SkyKey {
   fogFar: number;
 }
 
-// Étalonnage jour/nuit (interpolé). Heures en 0..24.
+// Étalonnage réaliste jour/nuit (interpolé). Heures en 0..24.
 const KEYS: SkyKey[] = [
-  { h: 0, top: 0x070b1c, horizon: 0x141c33, sun: 0x8fa6ff, sunI: 0.22, hemiI: 0.4, fogFar: 260 },
-  { h: 5, top: 0x0b1130, horizon: 0x2a2f52, sun: 0x9fb0ff, sunI: 0.24, hemiI: 0.42, fogFar: 260 },
-  { h: 6.5, top: 0x3f5f95, horizon: 0xf0a562, sun: 0xffc48a, sunI: 0.9, hemiI: 0.55, fogFar: 320 },
-  { h: 9, top: 0x4f9de0, horizon: 0xc9e2f2, sun: 0xfff1d8, sunI: 2.4, hemiI: 0.95, fogFar: 380 },
-  { h: 13, top: 0x3f8fdc, horizon: 0xd6e9f5, sun: 0xffffff, sunI: 2.8, hemiI: 1.0, fogFar: 400 },
-  { h: 16.5, top: 0x4c93d4, horizon: 0xe9d7b8, sun: 0xffe7c0, sunI: 2.1, hemiI: 0.9, fogFar: 380 },
-  { h: 18.2, top: 0x35427a, horizon: 0xff8f5e, sun: 0xffa66a, sunI: 0.9, hemiI: 0.55, fogFar: 320 },
-  { h: 19.5, top: 0x121a3f, horizon: 0x3b3562, sun: 0xb8a4ff, sunI: 0.26, hemiI: 0.42, fogFar: 270 },
-  { h: 24, top: 0x070b1c, horizon: 0x141c33, sun: 0x8fa6ff, sunI: 0.22, hemiI: 0.4, fogFar: 260 },
+  { h: 0, top: 0x070b1c, horizon: 0x141c33, sun: 0x8fa6ff, sunI: 0.22, hemiI: 0.4, fogFar: 300 },
+  { h: 5, top: 0x0b1130, horizon: 0x2a2f52, sun: 0x9fb0ff, sunI: 0.24, hemiI: 0.42, fogFar: 300 },
+  { h: 6.5, top: 0x3f5f95, horizon: 0xf0a562, sun: 0xffc48a, sunI: 0.9, hemiI: 0.55, fogFar: 360 },
+  { h: 9, top: 0x4f9de0, horizon: 0xc9e2f2, sun: 0xfff1d8, sunI: 2.4, hemiI: 0.95, fogFar: 440 },
+  { h: 13, top: 0x3f8fdc, horizon: 0xd6e9f5, sun: 0xffffff, sunI: 2.8, hemiI: 1.0, fogFar: 480 },
+  { h: 16.5, top: 0x4c93d4, horizon: 0xe9d7b8, sun: 0xffe7c0, sunI: 2.1, hemiI: 0.9, fogFar: 440 },
+  { h: 18.2, top: 0x35427a, horizon: 0xff8f5e, sun: 0xffa66a, sunI: 0.9, hemiI: 0.55, fogFar: 360 },
+  { h: 19.5, top: 0x121a3f, horizon: 0x3b3562, sun: 0xb8a4ff, sunI: 0.26, hemiI: 0.42, fogFar: 320 },
+  { h: 24, top: 0x070b1c, horizon: 0x141c33, sun: 0x8fa6ff, sunI: 0.22, hemiI: 0.4, fogFar: 300 },
 ];
 
 const cA = new THREE.Color();
@@ -32,13 +32,13 @@ const cB = new THREE.Color();
 
 export class Environment {
   hour = 10;
-  /** vitesse du temps : 1 h de jeu = 40 s réelles */
-  timeScale = 1 / 40;
+  /** vitesse du temps : 1 h de jeu = 45 s réelles */
+  timeScale = 1 / 45;
   weather: Weather = "sunny";
   wetness = 0; // 0..1 chaussée mouillée
   cloudCover = 0; // 0..1
   nightFactor = 0; // 0..1
-  private weatherTimer = 90;
+  private weatherTimer = 120;
   private skyMat: THREE.ShaderMaterial;
   private sky: THREE.Mesh;
   private clouds: THREE.Mesh;
@@ -46,6 +46,8 @@ export class Environment {
   private rain: THREE.Points;
   private rainPos: Float32Array;
   private rainMat: THREE.PointsMaterial;
+  private stars: THREE.Points;
+  private starsMat: THREE.PointsMaterial;
   private sunDir = new THREE.Vector3(0.4, 0.8, 0.3);
   private quality: Quality = "high";
 
@@ -54,7 +56,7 @@ export class Environment {
     private sun: THREE.DirectionalLight,
     private hemi: THREE.HemisphereLight
   ) {
-    // ── dôme de ciel dégradé ──
+    // ── Dôme de ciel équatorial avec dégradé ──
     this.skyMat = new THREE.ShaderMaterial({
       uniforms: {
         topColor: { value: new THREE.Color(0x4f9de0) },
@@ -77,8 +79,8 @@ export class Environment {
           float h = clamp(vDir.y, 0.0, 1.0);
           vec3 col = mix(horizonColor, topColor, pow(h, 0.55));
           float s = max(dot(normalize(vDir), normalize(sunDir)), 0.0);
-          col += sunColor * pow(s, 260.0) * 1.6 * sunGlow;   // disque
-          col += sunColor * pow(s, 8.0) * 0.18 * sunGlow;    // halo
+          col += sunColor * pow(s, 260.0) * 1.6 * sunGlow;   // disque solaire
+          col += sunColor * pow(s, 8.0) * 0.18 * sunGlow;    // halo atmosphérique
           if (vDir.y < 0.0) col = mix(horizonColor, horizonColor * 0.6, clamp(-vDir.y * 4.0, 0.0, 1.0));
           gl_FragColor = vec4(col, 1.0);
         }`,
@@ -86,12 +88,41 @@ export class Environment {
       depthWrite: false,
       fog: false,
     });
-    this.sky = new THREE.Mesh(new THREE.SphereGeometry(700, 24, 14), this.skyMat);
+    this.sky = new THREE.Mesh(new THREE.SphereGeometry(900, 24, 14), this.skyMat);
     this.sky.frustumCulled = false;
     this.sky.renderOrder = -10;
     scene.add(this.sky);
 
-    // ── nuages : plan texturé qui dérive ──
+    // ── Ciel étoilé nocturne ──
+    const starCount = 800;
+    const starPos = new Float32Array(starCount * 3);
+    for (let i = 0; i < starCount; i++) {
+      const u = Math.random();
+      const v = Math.random();
+      const theta = u * 2.0 * Math.PI;
+      const phi = Math.acos(2.0 * v - 1.0);
+      const r = 850;
+      const y = Math.abs(r * Math.cos(phi));
+      starPos[i * 3] = r * Math.sin(phi) * Math.sin(theta);
+      starPos[i * 3 + 1] = y + 50;
+      starPos[i * 3 + 2] = r * Math.sin(phi) * Math.cos(theta);
+    }
+    const starGeo = new THREE.BufferGeometry();
+    starGeo.setAttribute("position", new THREE.BufferAttribute(starPos, 3));
+    this.starsMat = new THREE.PointsMaterial({
+      color: 0xffffff,
+      size: 2.2,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      fog: false,
+    });
+    this.stars = new THREE.Points(starGeo, this.starsMat);
+    this.stars.frustumCulled = false;
+    this.stars.renderOrder = -9;
+    scene.add(this.stars);
+
+    // ── Nuages tropicaux en dérive ──
     this.cloudMat = new THREE.MeshBasicMaterial({
       map: makeClouds(),
       transparent: true,
@@ -99,26 +130,26 @@ export class Environment {
       depthWrite: false,
       fog: false,
     });
-    this.cloudMat.map!.repeat.set(3, 3);
-    this.clouds = new THREE.Mesh(new THREE.PlaneGeometry(1600, 1600), this.cloudMat);
+    if (this.cloudMat.map) this.cloudMat.map.repeat.set(3, 3);
+    this.clouds = new THREE.Mesh(new THREE.PlaneGeometry(2400, 2400), this.cloudMat);
     this.clouds.rotation.x = Math.PI / 2;
-    this.clouds.position.y = 110;
+    this.clouds.position.y = 130;
     this.clouds.renderOrder = -5;
     scene.add(this.clouds);
 
-    // ── pluie : nuage de points autour de la caméra ──
-    const n = 1400;
+    // ── Pluie tropicale battante ──
+    const n = 1600;
     this.rainPos = new Float32Array(n * 3);
     for (let i = 0; i < n; i++) {
-      this.rainPos[i * 3] = (Math.random() - 0.5) * 70;
-      this.rainPos[i * 3 + 1] = Math.random() * 40;
-      this.rainPos[i * 3 + 2] = (Math.random() - 0.5) * 70;
+      this.rainPos[i * 3] = (Math.random() - 0.5) * 85;
+      this.rainPos[i * 3 + 1] = Math.random() * 45;
+      this.rainPos[i * 3 + 2] = (Math.random() - 0.5) * 85;
     }
     const rg = new THREE.BufferGeometry();
     rg.setAttribute("position", new THREE.BufferAttribute(this.rainPos, 3));
     this.rainMat = new THREE.PointsMaterial({
       map: makeRainStreak(),
-      size: 0.9,
+      size: 1.1,
       transparent: true,
       opacity: 0,
       depthWrite: false,
@@ -141,19 +172,25 @@ export class Environment {
     this.hour = ((h % 24) + 24) % 24;
   }
 
+  clockLabel() {
+    const h = Math.floor(this.hour);
+    const m = Math.floor((this.hour - h) * 60);
+    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+  }
+
   setWeather(w: Weather, instant = false) {
     this.weather = w;
-    this.weatherTimer = 120 + Math.random() * 120;
+    this.weatherTimer = 140 + Math.random() * 120;
     if (instant) {
-      this.cloudCover = w === "sunny" ? 0.25 : w === "cloudy" ? 0.8 : 1;
+      this.cloudCover = w === "sunny" ? 0.2 : w === "cloudy" ? 0.8 : w === "fog" ? 0.6 : 1;
       this.wetness = w === "rain" ? 1 : 0;
-      this.rainMat.opacity = w === "rain" ? 0.7 : 0;
+      this.rainMat.opacity = w === "rain" ? 0.75 : 0;
     }
   }
 
-  /** adhérence : 1 = sec, ~0.7 = chaussée détrempée */
+  /** Adhérence des pneus : 1 = sol sec, ~0.68 sous forte pluie */
   gripFactor() {
-    return 1 - this.wetness * 0.3;
+    return 1 - this.wetness * 0.32;
   }
 
   private sample(hour: number): SkyKey {
@@ -182,91 +219,92 @@ export class Environment {
   update(dt: number, focus: THREE.Vector3, playing: boolean) {
     if (playing) this.hour = (this.hour + dt * this.timeScale) % 24;
 
-    // ── météo : change toutes les 2 à 4 minutes ──
+    // Transition météorologique
     if (playing) {
       this.weatherTimer -= dt;
       if (this.weatherTimer <= 0) {
         const r = Math.random();
-        this.weather = r < 0.5 ? "sunny" : r < 0.8 ? "cloudy" : "rain";
-        this.weatherTimer = 120 + Math.random() * 140;
+        this.weather = r < 0.5 ? "sunny" : r < 0.75 ? "cloudy" : r < 0.92 ? "rain" : "fog";
+        this.weatherTimer = 140 + Math.random() * 160;
       }
     }
-    const targetCloud = this.weather === "sunny" ? 0.25 : this.weather === "cloudy" ? 0.8 : 1;
+
+    const targetCloud = this.weather === "sunny" ? 0.2 : this.weather === "cloudy" ? 0.8 : this.weather === "fog" ? 0.6 : 1;
     this.cloudCover += (targetCloud - this.cloudCover) * Math.min(1, dt * 0.15);
+    this.clouds.visible = this.quality !== "low";
     const targetWet = this.weather === "rain" ? 1 : 0;
     this.wetness += (targetWet - this.wetness) * Math.min(1, dt * (targetWet ? 0.12 : 0.035));
 
-    // ── soleil : lever 6 h, coucher 18 h ──
+    // Position du soleil et de la lune
     const k = this.sample(this.hour);
-    const dayT = (this.hour - 6) / 12; // 0 au lever, 1 au coucher
+    const dayT = (this.hour - 6) / 12;
     const elev = Math.sin(Math.PI * Math.min(1, Math.max(0, dayT)));
     const isDay = this.hour > 6 && this.hour < 18;
     const az = (this.hour / 24) * Math.PI * 2;
+
     if (isDay) {
       this.sunDir.set(Math.cos(az) * 0.8, 0.15 + elev * 0.9, Math.sin(az) * 0.8).normalize();
     } else {
-      // « lune » : faible lumière bleutée venant de haut
       this.sunDir.set(0.3, 0.9, -0.2).normalize();
     }
+
     this.nightFactor = THREE.MathUtils.clamp(1 - k.sunI / 1.2, 0, 1);
     const cloudDim = 1 - this.cloudCover * 0.45;
 
     this.sun.color.setHex(k.sun);
     this.sun.intensity = k.sunI * cloudDim;
-    this.sun.position.copy(focus).addScaledVector(this.sunDir, 160);
+    this.sun.position.copy(focus).addScaledVector(this.sunDir, 180);
     this.sun.target.position.copy(focus);
     this.sun.target.updateMatrixWorld();
 
     this.hemi.intensity = k.hemiI * (1 - this.cloudCover * 0.25);
-    this.hemi.color.setHex(k.top).lerp(cB.setHex(0xffffff), 0.35);
-    this.hemi.groundColor.setHex(0x6b4a2a).lerp(cB.setHex(k.horizon), 0.35);
 
-    // ciel + brouillard cohérents
-    const top = cA.setHex(k.top).lerp(cB.setHex(0x8c9aa8), this.cloudCover * 0.7).clone();
-    const horizon = cA.setHex(k.horizon).lerp(cB.setHex(0xb8c2cc), this.cloudCover * 0.6).clone();
-    (this.skyMat.uniforms.topColor.value as THREE.Color).copy(top);
-    (this.skyMat.uniforms.horizonColor.value as THREE.Color).copy(horizon);
-    (this.skyMat.uniforms.sunDir.value as THREE.Vector3).copy(this.sunDir);
-    (this.skyMat.uniforms.sunColor.value as THREE.Color).setHex(k.sun);
-    this.skyMat.uniforms.sunGlow.value = isDay ? 1 - this.cloudCover * 0.8 : 0;
-    this.sky.position.copy(focus);
-    if (this.scene.fog) {
-      const fog = this.scene.fog as THREE.Fog;
-      fog.color.copy(horizon);
-      fog.far = k.fogFar - this.cloudCover * 60 - this.wetness * 40;
-      fog.near = fog.far * 0.32;
+    // Dérive des nuages
+    this.clouds.position.x = focus.x + (Date.now() * 0.002) % 400;
+    this.clouds.position.z = focus.z + (Date.now() * 0.001) % 400;
+    this.cloudMat.opacity = THREE.MathUtils.lerp(0.2, 0.65, this.cloudCover);
+
+    // Étoiles de nuit
+    this.starsMat.opacity = Math.max(0, (this.nightFactor - 0.45) * 1.8);
+    this.stars.position.copy(focus);
+
+    // Animation de la pluie
+    const isRaining = this.weather === "rain";
+    const targetRainOp = isRaining ? 0.75 : 0;
+    this.rainMat.opacity += (targetRainOp - this.rainMat.opacity) * Math.min(1, dt * 2.5);
+    this.rain.visible = this.rainMat.opacity > 0.01;
+
+    if (this.rain.visible) {
+      this.rain.position.set(focus.x, 0, focus.z);
+      const pos = this.rainPos;
+      for (let i = 0; i < pos.length / 3; i++) {
+        pos[i * 3 + 1] -= dt * 45;
+        if (pos[i * 3 + 1] < 0) pos[i * 3 + 1] += 42;
+      }
+      this.rain.geometry.attributes.position.needsUpdate = true;
     }
 
-    // nuages
-    this.cloudMat.opacity = 0.15 + this.cloudCover * 0.65;
-    this.cloudMat.color.setHex(k.top).lerp(cB.setHex(0xffffff), 0.75 - this.nightFactor * 0.6);
-    this.cloudMat.map!.offset.x += dt * 0.004;
-    this.clouds.position.x = focus.x;
-    this.clouds.position.z = focus.z;
+    // Teinte du ciel
+    const u = this.skyMat.uniforms;
+    u.topColor.value.setHex(k.top);
+    u.horizonColor.value.setHex(k.horizon);
+    u.sunDir.value.copy(this.sunDir);
+    u.sunColor.value.setHex(k.sun);
+    u.sunGlow.value = isDay ? 1 - this.cloudCover * 0.7 : 0.2;
 
-    // pluie
-    const raining = this.weather === "rain" && this.quality !== "low";
-    this.rain.visible = raining || this.rainMat.opacity > 0.01;
-    this.rainMat.opacity += ((raining ? 0.7 : 0) - this.rainMat.opacity) * Math.min(1, dt * 0.8);
-    if (this.rain.visible) {
-      const p = this.rainPos;
-      for (let i = 0; i < p.length; i += 3) {
-        p[i + 1] -= dt * 38;
-        if (p[i + 1] < 0) {
-          p[i + 1] = 40;
-          p[i] = (Math.random() - 0.5) * 70;
-          p[i + 2] = (Math.random() - 0.5) * 70;
-        }
-      }
-      (this.rain.geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true;
-      this.rain.position.set(focus.x, 0, focus.z);
+    // Brouillard équatorial
+    if (this.scene.fog && this.scene.fog instanceof THREE.Fog) {
+      this.scene.fog.color.setHex(k.horizon);
+      const isFoggy = this.weather === "fog";
+      const fogTarget = isFoggy ? 90 : isRaining ? 180 : k.fogFar;
+      this.scene.fog.far += (fogTarget - this.scene.fog.far) * Math.min(1, dt * 0.5);
     }
   }
 
-  /** libellé pour le HUD */
-  clockLabel() {
-    const h = Math.floor(this.hour);
-    const m = Math.floor((this.hour - h) * 60);
-    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+  applyRoadWetness(roads: THREE.MeshStandardMaterial[]) {
+    const wetRough = 0.45;
+    const dryRough = 0.95;
+    const r = THREE.MathUtils.lerp(dryRough, wetRough, this.wetness);
+    for (const m of roads) m.roughness = r;
   }
 }

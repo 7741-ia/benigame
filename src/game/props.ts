@@ -37,6 +37,9 @@ const SIGN_BG: Record<PoiType, string> = {
   market: "#b3261e",
   clothing: "#5b2d8e",
   leisure: "#0e7c86",
+  pharmacy: "#059669",
+  fuel: "#d97706",
+  admin: "#475569",
 };
 const GOODS = [0xd63b2f, 0xe8c531, 0x4f8a3a, 0xc27a3a, 0x2c4f7c, 0xf2f2f2, 0x8b2f2f];
 const CLOTHES = [0xd63b2f, 0xf2c12e, 0x2c4f7c, 0x2e7d4f, 0xf5f1e8, 0x5b2d8e, 0xe07a1f];
