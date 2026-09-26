@@ -152,6 +152,7 @@ export class Game {
   // entrées tactiles
   private touchThrottle = 0;
   private touchSteer = 0;
+  private rawTouchSteer = 0;
   private touchBrake = false;
   private touchNitro = false;
 
@@ -2131,7 +2132,7 @@ export class Game {
   /** commandes tactiles (pédale, direction, frein) */
   setTouchInput(throttle: number, steer: number, brake: boolean, nitro: boolean = false) {
     this.touchThrottle = throttle;
-    this.touchSteer = steer;
+    this.rawTouchSteer = steer;
     this.touchBrake = brake;
     if (nitro) this.touchNitro = true;
   }
@@ -2140,6 +2141,13 @@ export class Game {
   setNitro(active: boolean) {
     if (!active) this.nitroWasPressed = false;
     this.touchNitro = active;
+  }
+
+  /** klaxonner */
+  honk() {
+    audio.horn();
+    const targetObj = this.playerMode === "vehicle" ? this.bike : this.walker;
+    this.say(targetObj, "POUÊT ! 📢", 1.2);
   }
 
   // ---------- commandes ----------
@@ -2155,6 +2163,7 @@ export class Game {
       if (!this.deliverPackage()) this.interact();
     }
     if (e.key.toLowerCase() === "f") this.toggleVehicleMode();
+    if (e.key.toLowerCase() === "h") this.honk();
     if (e.key.toLowerCase() === "k") this.toggleCruise();
     if (e.key === "+" || e.key === "]") this.adjustCruise(5);
     if (e.key === "-" || e.key === "[") this.adjustCruise(-5);
@@ -2401,6 +2410,16 @@ export class Game {
       audio.upgrade();
     }
     this.nitroWasPressed = nitroKey;
+    // Direction tactile progressive : monte avec régularité quand maintenu, revient au centre au relâchement
+    if (this.rawTouchSteer !== 0) {
+      const steerRampRate = 6.0;
+      this.touchSteer += (this.rawTouchSteer - this.touchSteer) * Math.min(1, dt * steerRampRate);
+    } else {
+      const steerReturnRate = 9.0;
+      this.touchSteer += (0 - this.touchSteer) * Math.min(1, dt * steerReturnRate);
+      if (Math.abs(this.touchSteer) < 0.005) this.touchSteer = 0;
+    }
+
     throttle += this.touchThrottle;
     steer += this.touchSteer;
     throttle = Math.max(-1, Math.min(1, throttle));
@@ -2710,6 +2729,12 @@ export class Game {
     if (this.keys["s"] || this.keys["arrowdown"]) move -= 1;
     if (this.keys["a"] || this.keys["arrowleft"]) steer -= 1;
     if (this.keys["d"] || this.keys["arrowright"]) steer += 1;
+    if (this.rawTouchSteer !== 0) {
+      this.touchSteer += (this.rawTouchSteer - this.touchSteer) * Math.min(1, dt * 10);
+    } else {
+      this.touchSteer += (0 - this.touchSteer) * Math.min(1, dt * 12);
+      if (Math.abs(this.touchSteer) < 0.005) this.touchSteer = 0;
+    }
     move = Math.max(-1, Math.min(1, move + this.touchThrottle));
     steer = Math.max(-1, Math.min(1, steer + this.touchSteer));
 

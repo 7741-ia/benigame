@@ -123,6 +123,15 @@ export default function App() {
     if (typeof window === "undefined") return false;
     return window.innerHeight > window.innerWidth && window.innerWidth < 900;
   });
+  const [isTouchDevice, setIsTouchDevice] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return (
+      "ontouchstart" in window ||
+      navigator.maxTouchPoints > 0 ||
+      window.matchMedia("(pointer: coarse)").matches ||
+      window.innerWidth <= 1024
+    );
+  });
   const [dismissPortraitWarning, setDismissPortraitWarning] = useState(false);
   const toastId = useRef(0);
 
@@ -130,6 +139,12 @@ export default function App() {
     const handleOrientation = () => {
       const portrait = window.innerHeight > window.innerWidth && window.innerWidth < 900;
       setIsPortrait(portrait);
+      setIsTouchDevice(
+        "ontouchstart" in window ||
+        navigator.maxTouchPoints > 0 ||
+        window.matchMedia("(pointer: coarse)").matches ||
+        window.innerWidth <= 1024
+      );
     };
 
     try {
@@ -515,22 +530,35 @@ export default function App() {
       {/* ================= IN-GAME HUD ================= */}
       {(phase === "playing" || phase === "paused") && (
         <>
-          <TouchControls
-            onInput={handleTouch}
-            mode={hud.playerMode}
-            canEnterVehicle={hud.canEnterVehicle}
-            canInteract={!!hud.nearPoi || !!hud.buildingName || !!hud.nearbyInteraction}
-            nearbyInteraction={hud.nearbyInteraction}
-            running={hud.running}
-            onToggleVehicle={() => gameRef.current?.toggleVehicleMode()}
-            onToggleRun={() => gameRef.current?.toggleRun()}
-            onInteract={() => {
-              if (hud.nearbyInteraction?.id === "tv") {
-                setTvRemoteOpen(true);
-              }
-              gameRef.current?.interact();
-            }}
-          />
+          {isTouchDevice && (
+            <TouchControls
+              onInput={handleTouch}
+              mode={hud.playerMode}
+              canEnterVehicle={hud.canEnterVehicle}
+              canInteract={!!hud.nearPoi || !!hud.buildingName || !!hud.nearbyInteraction}
+              nearbyInteraction={hud.nearbyInteraction}
+              running={hud.running}
+              nearNpc={hud.nearNpc}
+              speed={hud.speed}
+              maxSpeed={hud.maxSpeed}
+              hasNitro={hud.nitroMax > 0}
+              nitroActive={hud.nitroActive}
+              nitroCharge={hud.nitroCharge}
+              nitroMax={hud.nitroMax}
+              onNitro={(active) => gameRef.current?.setNitro(active)}
+              onToggleVehicle={() => gameRef.current?.toggleVehicleMode()}
+              onToggleRun={() => gameRef.current?.toggleRun()}
+              onHorn={() => gameRef.current?.honk()}
+              onCycleCamera={() => gameRef.current?.cycleCamera()}
+              onGreetNpc={() => gameRef.current?.greetNearbyNpc()}
+              onInteract={() => {
+                if (hud.nearbyInteraction?.id === "tv") {
+                  setTvRemoteOpen(true);
+                }
+                gameRef.current?.interact();
+              }}
+            />
+          )}
 
           {/* Top-left: stats + timer + progress */}
           <div className="pointer-events-none absolute left-3 top-3 z-10 flex flex-col gap-2">
@@ -812,61 +840,42 @@ export default function App() {
             </div>
           )}
 
-          {/* Bottom-right speedometer (desktop) */}
-          {hud.playerMode === "vehicle" && <div className="pointer-events-none absolute bottom-3 right-3 z-10 hidden md:block">
-            <Speedometer speed={hud.speed} max={hud.maxSpeed} />
-          </div>}
-          {/* mobile compact speed */}
-          {hud.playerMode === "vehicle" && <div className="pointer-events-none absolute left-1/2 bottom-3 z-10 -translate-x-1/2 md:hidden">
-            <div className="rounded-lg bg-black/50 px-3 py-1 text-center backdrop-blur-md ring-1 ring-white/20">
-              <span className="text-xl font-black leading-none">{hud.speed}</span>
-              <span className="ml-1 text-[9px] opacity-70">km/h</span>
+          {/* Bottom-right speedometer (desktop PC only) */}
+          {hud.playerMode === "vehicle" && !isTouchDevice && (
+            <div className="pointer-events-none absolute bottom-3 right-3 z-10">
+              <Speedometer speed={hud.speed} max={hud.maxSpeed} />
             </div>
-          </div>}
-          {/* Nitro button - bottom center on mobile */}
-          {hud.playerMode === "vehicle" && <button
-            onPointerDown={(e) => {
-              e.preventDefault();
-              gameRef.current?.setNitro(true);
-            }}
-            onPointerUp={(e) => {
-              e.preventDefault();
-              gameRef.current?.setNitro(false);
-            }}
-            onPointerLeave={() => gameRef.current?.setNitro(false)}
-            onPointerCancel={() => gameRef.current?.setNitro(false)}
-            className="pointer-events-auto absolute bottom-[5.5rem] left-1/2 z-10 -translate-x-1/2 md:hidden h-14 w-14 rounded-full bg-gradient-to-r from-cyan-400 to-blue-500 text-2xl font-black active:scale-90 shadow-lg shadow-cyan-500/50 touch-none select-none"
-          >
-            ⚡
-          </button>}
+          )}
 
-          {/* Vehicle / walking actions */}
-          <div className="pointer-events-auto absolute bottom-[9.5rem] left-1/2 z-30 flex -translate-x-1/2 gap-2 md:bottom-12">
-            {(hud.playerMode === "vehicle" ? hud.speed < 6 : hud.canEnterVehicle) && (
-              <button
-                onClick={() => gameRef.current?.toggleVehicleMode()}
-                className="rounded-xl bg-sky-500 px-4 py-2 text-xs font-black shadow-lg active:scale-95"
-              >
-                {hud.playerMode === "vehicle" ? "Descendre" : "Monter"} <span className="opacity-60">F</span>
-              </button>
-            )}
-            {hud.playerMode === "walk" && hud.nearNpc && (
-              <>
+          {/* Actions clavier / bureau (Desktop PC uniquement, gérées par TouchControls sur mobile) */}
+          {!isTouchDevice && (
+            <div className="pointer-events-auto absolute bottom-12 left-1/2 z-30 flex -translate-x-1/2 gap-2">
+              {(hud.playerMode === "vehicle" ? hud.speed < 6 : hud.canEnterVehicle) && (
                 <button
-                  onClick={() => gameRef.current?.greetNearbyNpc()}
-                  className="rounded-xl bg-emerald-500 px-4 py-2 text-xs font-black shadow-lg active:scale-95"
+                  onClick={() => gameRef.current?.toggleVehicleMode()}
+                  className="rounded-xl bg-sky-500 px-4 py-2 text-xs font-black shadow-lg active:scale-95"
                 >
-                  Saluer
+                  {hud.playerMode === "vehicle" ? "Descendre" : "Monter"} <span className="opacity-60">F</span>
                 </button>
-                <button
-                  onClick={() => gameRef.current?.askNearbyNpcDirection()}
-                  className="rounded-xl bg-white/85 px-4 py-2 text-xs font-black text-slate-900 shadow-lg active:scale-95"
-                >
-                  Demander le chemin
-                </button>
-              </>
-            )}
-          </div>
+              )}
+              {hud.playerMode === "walk" && hud.nearNpc && (
+                <>
+                  <button
+                    onClick={() => gameRef.current?.greetNearbyNpc()}
+                    className="rounded-xl bg-emerald-500 px-4 py-2 text-xs font-black shadow-lg active:scale-95"
+                  >
+                    Saluer
+                  </button>
+                  <button
+                    onClick={() => gameRef.current?.askNearbyNpcDirection()}
+                    className="rounded-xl bg-white/85 px-4 py-2 text-xs font-black text-slate-900 shadow-lg active:scale-95"
+                  >
+                    Demander le chemin
+                  </button>
+                </>
+              )}
+            </div>
+          )}
         </>
       )}
 
