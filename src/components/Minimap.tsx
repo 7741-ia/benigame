@@ -1,10 +1,18 @@
-import { useEffect, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import type { HudState } from "../game/types";
 import { GRID_LINES, CELL, HALF } from "../game/constants";
 import { DISTRICTS, POIS, landmarkWorld } from "../game/districts";
 
-export default function Minimap({ hud }: { hud: HudState }) {
+export default function Minimap({
+  hud,
+  onOpenMap,
+}: {
+  hud: HudState;
+  onOpenMap?: () => void;
+}) {
   const ref = useRef<HTMLCanvasElement>(null);
+  const [expanded, setExpanded] = useState(false);
+  const mapSize = expanded ? 160 : 100;
 
   useEffect(() => {
     const canvas = ref.current;
@@ -127,18 +135,34 @@ export default function Minimap({ hud }: { hud: HudState }) {
   });
 
   return (
-    <div className="rounded-xl bg-black/50 p-1 backdrop-blur-md ring-1 ring-white/20 shadow-lg shadow-black/40">
-      <div className="flex items-center justify-between px-1 pb-0.5 text-[8px] font-bold uppercase tracking-wider text-white/60">
-        <span>🗺️ Beni</span>
-        <span className={hud.hasPackage ? "text-emerald-300" : "text-amber-300"}>
-          {hud.hasPackage ? "● Livraison" : "● Colis"}
-        </span>
+    <div className="relative rounded-2xl bg-slate-900/80 p-1 backdrop-blur-md ring-1 ring-white/20 shadow-xl select-none">
+      <div className="flex items-center justify-between px-1.5 pb-1 text-[9px] font-black uppercase tracking-wider text-white/70">
+        <button
+          onClick={onOpenMap}
+          className="flex items-center gap-1 hover:text-sky-300 transition-colors pointer-events-auto"
+          title="Ouvrir la grande carte"
+        >
+          <span>🗺️ Beni</span>
+        </button>
+        <div className="flex items-center gap-1.5">
+          <span className={`text-[8px] font-bold ${hud.hasPackage ? "text-emerald-400" : "text-amber-400"}`}>
+            {hud.hasPackage ? "● Livraison" : "● Colis"}
+          </span>
+          <button
+            onClick={() => setExpanded((e) => !e)}
+            className="flex h-4 w-4 items-center justify-center rounded bg-white/10 hover:bg-white/20 text-[10px] pointer-events-auto transition-transform active:scale-90"
+            title={expanded ? "Réduire la minimap" : "Agrandir la minimap"}
+          >
+            {expanded ? "⤡" : "⤢"}
+          </button>
+        </div>
       </div>
-      <canvas ref={ref} width={128} height={128} className="rounded-lg" />
-      <div className="flex justify-between px-1 pt-0.5 text-[7px] font-bold text-white/55">
-        <span className="text-amber-300">■ Boutique</span>
-        <span className="text-green-300">■ Resto</span>
-        <span className="text-cyan-300">■ Kiosque</span>
+      <div
+        onClick={onOpenMap}
+        className="cursor-pointer overflow-hidden rounded-xl border border-white/10 pointer-events-auto"
+        title="Cliquer pour ouvrir la grande carte"
+      >
+        <canvas ref={ref} width={mapSize} height={mapSize} className="block transition-all duration-200" />
       </div>
     </div>
   );

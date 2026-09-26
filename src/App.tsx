@@ -119,6 +119,7 @@ export default function App() {
   const [profileOpen, setProfileOpen] = useState(false);
   const [lifePanel, setLifePanel] = useState<"home" | "market" | "activities" | null>(null);
   const [tvRemoteOpen, setTvRemoteOpen] = useState(false);
+  const [cruiseOpen, setCruiseOpen] = useState(false);
   const [isPortrait, setIsPortrait] = useState(() => {
     if (typeof window === "undefined") return false;
     return window.innerHeight > window.innerWidth && window.innerWidth < 900;
@@ -539,7 +540,6 @@ export default function App() {
               nearbyInteraction={hud.nearbyInteraction}
               running={hud.running}
               nearNpc={hud.nearNpc}
-              speed={hud.speed}
               maxSpeed={hud.maxSpeed}
               hasNitro={hud.nitroMax > 0}
               nitroActive={hud.nitroActive}
@@ -560,283 +560,288 @@ export default function App() {
             />
           )}
 
-          {/* Top-left: stats + timer + progress */}
-          <div className="pointer-events-none absolute left-3 top-3 z-10 flex flex-col gap-2">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <StatChip icon="💰" value={`$${hud.money}`} color="from-amber-400 to-yellow-500" />
-              <StatChip icon="⭐" value={hud.score.toLocaleString()} color="from-violet-400 to-fuchsia-500" />
-              <StatChip icon="🏙️" value={`Niv. ${hud.level}`} color="from-sky-400 to-blue-500" />
-              {hud.combo > 1 && <StatChip icon="🔥" value={`x${hud.combo}`} color="from-orange-400 to-red-500" />}
-            </div>
-            {/* Timer */}
-            {!hud.freeRoam && <div className="w-44 max-w-[55vw]">
-              <div className="mb-0.5 flex items-center gap-1 text-xs font-bold">
-                <span>⏱</span>
-                <span className={timePct < 0.25 ? "text-red-400" : ""}>{hud.timeLeft.toFixed(1)}s</span>
+          {/* ================= BARRE SUPÉRIEURE ÉPURÉE ET MODERNE ================= */}
+          <div className="pointer-events-none absolute top-2 inset-x-2 z-20 flex items-start justify-between gap-1.5 select-none">
+            {/* GAUCHE : Profil, argent, niveau & jauges compactes */}
+            <div className="pointer-events-auto flex flex-col gap-1 rounded-2xl border border-white/15 bg-slate-900/80 px-2.5 py-1.5 backdrop-blur-md shadow-lg">
+              <div className="flex items-center gap-1.5 text-xs font-black">
+                <span className="flex items-center gap-1 text-amber-300">
+                  <span>💰</span>
+                  <span>${hud.money}</span>
+                </span>
+                <span className="h-3 w-px bg-white/20" />
+                <span className="flex items-center gap-1 text-[11px] text-sky-300">
+                  <span>🏙️</span>
+                  <span>Niv. {hud.level}</span>
+                </span>
+                {hud.combo > 1 && (
+                  <>
+                    <span className="h-3 w-px bg-white/20" />
+                    <span className="text-[10px] text-orange-400">🔥 x{hud.combo}</span>
+                  </>
+                )}
               </div>
-              <div className="h-2 overflow-hidden rounded-full bg-black/40 ring-1 ring-white/20">
+
+              {/* Jauges compactes : Énergie & Satiété */}
+              <div className="flex items-center gap-2 text-[10px] font-bold text-white/70">
+                <div className="flex items-center gap-1" title="Énergie">
+                  <span>⚡</span>
+                  <div className="h-1.5 w-10 overflow-hidden rounded-full bg-black/40 ring-1 ring-white/15">
+                    <div
+                      className={`h-full rounded-full transition-all duration-200 ${
+                        hud.fatigue > 70
+                          ? "bg-red-500"
+                          : hud.fatigue > 40
+                            ? "bg-amber-400"
+                            : "bg-emerald-400"
+                      }`}
+                      style={{ width: `${Math.max(0, 100 - hud.fatigue)}%` }}
+                    />
+                  </div>
+                </div>
+                <div className="flex items-center gap-1" title="Satiété">
+                  <span>🍲</span>
+                  <div className="h-1.5 w-10 overflow-hidden rounded-full bg-black/40 ring-1 ring-white/15">
+                    <div
+                      className={`h-full rounded-full transition-all duration-200 ${
+                        hud.hunger > 70 ? "bg-orange-500" : "bg-sky-400"
+                      }`}
+                      style={{ width: `${Math.max(0, 100 - hud.hunger)}%` }}
+                    />
+                  </div>
+                </div>
+                <span className="text-[9px] text-white/50">{hud.clock}</span>
+              </div>
+
+              {/* Minuteur si mission en cours */}
+              {!hud.freeRoam && hud.timeLeft > 0 && (
+                <div className="mt-0.5 flex flex-col gap-0.5">
+                  <div className="flex items-center justify-between text-[10px] font-bold">
+                    <span className="text-white/60">Temps</span>
+                    <span className={timePct < 0.25 ? "text-red-400 animate-pulse" : "text-sky-300"}>
+                      ⏱ {hud.timeLeft.toFixed(0)}s
+                    </span>
+                  </div>
+                  <div className="h-1 overflow-hidden rounded-full bg-black/40 ring-1 ring-white/15">
+                    <div
+                      className={`h-full transition-all duration-100 ${
+                        timePct < 0.25 ? "bg-red-500" : "bg-sky-400"
+                      }`}
+                      style={{ width: `${timePct * 100}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* CENTRE : Mission actuelle compacte & navigation sans masquer la route */}
+            <div className="pointer-events-auto flex flex-col items-center">
+              <div className="flex items-center gap-2 rounded-2xl border border-sky-400/30 bg-slate-900/85 px-3 py-1.5 backdrop-blur-md shadow-xl">
                 <div
-                  className={`h-full rounded-full transition-all duration-100 ${
-                    timePct < 0.25
-                      ? "bg-gradient-to-r from-red-500 to-orange-500"
-                      : "bg-gradient-to-r from-cyan-400 to-sky-500"
-                  }`}
-                  style={{ width: `${timePct * 100}%` }}
-                />
-              </div>
-            </div>}
-            {/* Progress */}
-            {!hud.freeRoam && <div className="w-44 max-w-[55vw]">
-              <div className="mb-0.5 flex justify-between text-[10px] font-semibold text-white/80">
-                <span>Livraisons</span>
-                <span>
-                  {hud.deliveriesDone}/{hud.deliveriesNeeded}
-                </span>
-              </div>
-              <div className="h-2 overflow-hidden rounded-full bg-black/40 ring-1 ring-white/20">
-                <div
-                  className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-green-500 transition-all duration-300"
-                  style={{ width: `${progressPct * 100}%` }}
-                />
-              </div>
-            </div>}
-          </div>
-
-          {/* Top-center: destination banner */}
-          <div className="pointer-events-none absolute left-1/2 top-3 z-10 flex -translate-x-1/2 items-center gap-2 rounded-xl bg-black/55 px-3 py-1.5 text-center backdrop-blur-md ring-1 ring-white/20">
-            <div
-              className="text-xl"
-              style={{ transform: `rotate(${arrowDeg}deg)`, transition: "transform 0.1s linear" }}
-            >
-              ⬆️
-            </div>
-            <div>
-              <div className="text-[9px] font-bold uppercase tracking-wider text-white/60">
-                {hud.navActive ? "Navigation" : hud.freeRoam ? "Mode libre" : hud.hasPackage ? "Livrer à" : "Récupérer à"}
-              </div>
-              <div className="text-sm font-black leading-tight text-amber-200">{hud.targetLabel || "…"}</div>
-            </div>
-            <div className="rounded-md bg-white/10 px-1.5 py-0.5 text-[10px] font-bold text-white/70">
-              {Math.round(distToTarget)}m
-            </div>
-          </div>
-
-          {/* Top-right: MINIMAP + controls */}
-          <div className="pointer-events-none absolute right-3 top-3 z-10 flex flex-col items-end gap-2">
-            <div className="flex items-center gap-2">
-              <button
-                onClick={openMap}
-                className="pointer-events-auto flex h-9 w-9 items-center justify-center rounded-full bg-sky-400/25 text-lg backdrop-blur-md ring-1 ring-sky-300/30 active:scale-90"
-                aria-label="Ouvrir la carte"
-              >
-                🗺️
-              </button>
-              <button
-                onClick={openPhone}
-                className="pointer-events-auto flex h-9 w-9 items-center justify-center rounded-full bg-white/15 text-lg backdrop-blur-md ring-1 ring-white/20 active:scale-90"
-                aria-label="Ouvrir le téléphone"
-              >
-                📱
-              </button>
-              <button
-                onClick={toggleMute}
-                className="pointer-events-auto flex h-9 w-9 items-center justify-center rounded-full bg-white/15 text-lg backdrop-blur-md ring-1 ring-white/20 active:scale-90"
-              >
-                {muted ? "🔇" : "🔊"}
-              </button>
-              <button
-                onClick={() => gameRef.current?.pause()}
-                className="pointer-events-auto flex h-9 w-9 items-center justify-center rounded-full bg-white/15 text-lg backdrop-blur-md ring-1 ring-white/20 active:scale-90"
-              >
-                ⏸
-              </button>
-            </div>
-            <Minimap hud={hud} />
-          </div>
-
-          {/* Nitro bar — above speed meter on mobile, bottom-center on desktop */}
-          {hud.playerMode === "vehicle" && <div className="pointer-events-none absolute left-1/2 bottom-[3.25rem] z-10 -translate-x-1/2 w-48 max-w-[60vw] md:bottom-3">
-            <div className="mb-0.5 flex items-center justify-between text-[10px] font-bold">
-              <span className={hud.nitroActive ? "text-cyan-300" : "text-white/60"}>
-                {hud.nitroActive ? "💨 NITRO!" : "⚡ Nitro"}
-              </span>
-              <span>{Math.round(hud.nitroCharge)}/{hud.nitroMax}</span>
-            </div>
-            <div className="h-2 overflow-hidden rounded-full bg-black/40 ring-1 ring-white/20">
-              <div
-                className={`h-full rounded-full transition-all duration-100 ${
-                  hud.nitroActive ? "bg-gradient-to-r from-cyan-300 to-blue-400" : "bg-gradient-to-r from-blue-500 to-cyan-400"
-                }`}
-                style={{ width: `${(hud.nitroCharge / hud.nitroMax) * 100}%` }}
-              />
-            </div>
-          </div>}
-
-          {/* Fatigue — se repose au restaurant */}
-          <div className="pointer-events-none absolute left-3 top-36 z-10 w-32">
-            <div className="mb-0.5 flex items-center justify-between text-[10px] font-bold">
-              <span className={hud.fatigue > 70 ? "text-red-400" : "text-white/60"}>
-                {hud.fatigue > 70 ? "😫 Fatigué !" : "🙂 Énergie"}
-              </span>
-              <span>{100 - hud.fatigue}%</span>
-            </div>
-            <div className="mt-2 mb-0.5 flex items-center justify-between text-[10px] font-bold">
-              <span className={hud.hunger > 70 ? "text-orange-300" : "text-white/60"}>
-                {hud.hunger > 70 ? "Faim" : "Satiété"}
-              </span>
-              <span>{100 - hud.hunger}%</span>
-            </div>
-            <div className="h-2 overflow-hidden rounded-full bg-black/40 ring-1 ring-white/20">
-              <div
-                className="h-full rounded-full bg-gradient-to-r from-amber-300 to-orange-500"
-                style={{ width: `${100 - hud.hunger}%` }}
-              />
-            </div>
-            <div className="h-2 overflow-hidden rounded-full bg-black/40 ring-1 ring-white/20">
-              <div
-                className={`h-full rounded-full transition-all duration-200 ${
-                  hud.fatigue > 70
-                    ? "bg-gradient-to-r from-red-500 to-orange-400"
-                    : "bg-gradient-to-r from-lime-400 to-green-500"
-                }`}
-                style={{ width: `${100 - hud.fatigue}%` }}
-              />
-            </div>
-          </div>
-
-          {/* Interaction contextuelle intelligente (Maison 3D, TV, Lit, Cuisine, Douche...) */}
-          {hud.nearbyInteraction ? (
-            <div className="pointer-events-auto absolute bottom-[12.5rem] left-1/2 z-30 -translate-x-1/2 md:bottom-[5.5rem]">
-              <button
-                onPointerDown={(e) => {
-                  e.preventDefault();
-                  if (hud.nearbyInteraction?.id === "tv") {
-                    setTvRemoteOpen(true);
-                  }
-                  gameRef.current?.interact();
-                }}
-                className="flex items-center gap-2.5 rounded-2xl bg-gradient-to-r from-emerald-500 to-sky-500 px-5 py-3 text-sm font-black text-white shadow-xl shadow-emerald-950/60 ring-2 ring-white/30 active:scale-95 animate-pulse"
-              >
-                <span className="text-2xl">{hud.nearbyInteraction.icon}</span>
-                <span>{hud.nearbyInteraction.prompt}</span>
-                <span className="rounded-lg bg-black/30 px-2 py-0.5 text-xs font-bold text-sky-200">
-                  {hud.nearbyInteraction.actionText.toUpperCase()} [E]
-                </span>
-              </button>
-            </div>
-          ) : hud.nearPoi ? (
-            <div className="pointer-events-auto absolute bottom-[12.5rem] left-1/2 z-30 -translate-x-1/2 md:bottom-[5.5rem]">
-              <button
-                onPointerDown={(e) => {
-                  e.preventDefault();
-                  audio.click();
-                  gameRef.current?.interact();
-                }}
-                className="flex items-center gap-2 rounded-2xl bg-gradient-to-r from-amber-400 to-yellow-500 px-5 py-3 text-sm font-black text-black shadow-xl shadow-amber-900/40 active:scale-95"
-              >
-                <span className="text-xl">{hud.nearPoi.emoji}</span>
-                <span>
-                  {hud.nearPoi.type === "shop"
-                    ? "Boutique — véhicules & équipement"
-                    : hud.nearPoi.type === "restaurant"
-                      ? `Manger ici ($8, repose +15s)`
-                      : hud.nearPoi.type === "kiosk"
-                        ? `Buvette — nitro plein ($5)`
-                        : hud.nearPoi.type === "home"
-                          ? "Entrer à la maison"
-                          : hud.nearPoi.type === "market"
-                            ? "Acheter des ingrédients"
-                            : hud.nearPoi.type === "clothing"
-                              ? "Boutique de vêtements"
-                              : "Activités et rencontres"}
-                </span>
-                <span className="rounded bg-black/20 px-1.5 py-0.5 text-[10px]">E</span>
-              </button>
-            </div>
-          ) : null}
-
-          {/* Étape de livraison : se garer, descendre, remettre le colis */}
-          {hud.deliveryPrompt && (
-            <div className="pointer-events-auto absolute left-1/2 top-24 z-30 flex -translate-x-1/2 items-center gap-2 rounded-2xl bg-emerald-600/90 px-4 py-2 text-sm font-black shadow-xl ring-1 ring-white/20 md:top-20">
-              <span>{hud.deliveryStage === "handover" ? "🤝" : "📍"}</span>
-              <span>{hud.deliveryPrompt}</span>
-              {hud.deliveryStage === "handover" && (
-                <button
-                  onPointerDown={(e) => {
-                    e.preventDefault();
-                    gameRef.current?.deliverPackage();
-                  }}
-                  className="ml-1 rounded-lg bg-white px-3 py-1 text-xs font-black text-emerald-800 active:scale-95"
+                  className="text-base"
+                  style={{ transform: `rotate(${arrowDeg}deg)`, transition: "transform 0.1s linear" }}
                 >
-                  Remettre (E)
+                  ⬆️
+                </div>
+                <div className="text-left">
+                  <div className="flex items-center gap-1.5 text-[9px] font-black uppercase tracking-wider text-sky-300">
+                    <span>
+                      {hud.navActive ? "📍 NAVIGATION" : hud.freeRoam ? "🚗 EXPLORATION" : hud.hasPackage ? "📦 LIVRAISON" : "📦 RÉCUPÉRATION"}
+                    </span>
+                    {!hud.freeRoam && (
+                      <span className="text-white/50">
+                        ({hud.deliveriesDone}/{hud.deliveriesNeeded})
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-xs font-black text-amber-200 truncate max-w-[130px] sm:max-w-[200px]">
+                    {hud.targetLabel || "En route"}
+                  </div>
+                </div>
+                <div className="rounded-lg bg-white/10 px-1.5 py-0.5 text-[10px] font-black text-white/80 tabular-nums">
+                  {Math.round(distToTarget)}m
+                </div>
+              </div>
+
+              {/* Petite barre de progression de mission */}
+              {!hud.freeRoam && (
+                <div className="mt-1 h-1 w-full max-w-[200px] overflow-hidden rounded-full bg-black/40 ring-1 ring-white/10">
+                  <div
+                    className="h-full bg-gradient-to-r from-emerald-400 to-sky-400 transition-all duration-300"
+                    style={{ width: `${progressPct * 100}%` }}
+                  />
+                </div>
+              )}
+
+              {/* Consigne d'étape de livraison (discrète sous la carte mission) */}
+              {hud.deliveryPrompt && (
+                <div className="mt-1 flex items-center gap-1.5 rounded-xl border border-emerald-400/40 bg-emerald-950/85 px-2.5 py-1 text-[11px] font-black text-emerald-200 shadow-lg backdrop-blur-md animate-pulse">
+                  <span>{hud.deliveryStage === "handover" ? "🤝" : "📍"}</span>
+                  <span>{hud.deliveryPrompt}</span>
+                  {hud.deliveryStage === "handover" && (
+                    <button
+                      onClick={() => gameRef.current?.deliverPackage()}
+                      className="ml-1 rounded-lg bg-emerald-400 px-2 py-0.5 text-[10px] font-black text-slate-950 active:scale-95"
+                    >
+                      Remettre [E]
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* DROITE : Raccourcis système & Minimap compacte */}
+            <div className="pointer-events-auto flex flex-col items-end gap-1">
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={openMap}
+                  className="flex h-7 w-7 items-center justify-center rounded-xl border border-sky-400/30 bg-black/45 text-xs backdrop-blur-md shadow-md active:scale-90"
+                  title="Carte de la ville"
+                >
+                  🗺️
                 </button>
+                <button
+                  onClick={openPhone}
+                  className="flex h-7 w-7 items-center justify-center rounded-xl border border-white/20 bg-black/45 text-xs backdrop-blur-md shadow-md active:scale-90"
+                  title="Smartphone"
+                >
+                  📱
+                </button>
+                <button
+                  onClick={toggleMute}
+                  className="flex h-7 w-7 items-center justify-center rounded-xl border border-white/20 bg-black/45 text-xs backdrop-blur-md shadow-md active:scale-90"
+                  title={muted ? "Activer le son" : "Couper le son"}
+                >
+                  {muted ? "🔇" : "🔊"}
+                </button>
+                <button
+                  onClick={() => gameRef.current?.pause()}
+                  className="flex h-7 w-7 items-center justify-center rounded-xl border border-white/20 bg-black/45 text-xs backdrop-blur-md shadow-md active:scale-90"
+                  title="Pause"
+                >
+                  ⏸
+                </button>
+              </div>
+              <Minimap hud={hud} onOpenMap={openMap} />
+            </div>
+          </div>
+
+          {/* ================= VITESSE & RÉGULATEUR COMPACT (COIN DROIT) ================= */}
+          {hud.playerMode === "vehicle" && (
+            <div className="pointer-events-auto absolute right-2.5 top-[9.5rem] z-20 flex flex-col items-end select-none">
+              <button
+                onClick={() => setCruiseOpen((o) => !o)}
+                className="flex flex-col items-end rounded-2xl border border-white/20 bg-slate-900/70 px-3 py-1.5 backdrop-blur-md shadow-lg hover:bg-slate-800/80 active:scale-95 transition-all text-right"
+                title="Cliquer pour régler le régulateur de vitesse"
+              >
+                <div className="text-[9px] font-bold uppercase tracking-wider text-white/50">Vitesse</div>
+                <div className="text-xl font-black tabular-nums text-white leading-none">
+                  {Math.round(hud.speed)}{" "}
+                  <span className="text-[10px] font-bold text-white/60">km/h</span>
+                </div>
+                <div className="mt-1 flex items-center gap-1 text-[9px] font-bold">
+                  <span className="text-white/50 uppercase tracking-wider">Régul.</span>
+                  <span
+                    className={`rounded px-1 py-0.2 font-black ${
+                      hud.cruiseOn
+                        ? "bg-emerald-500/25 text-emerald-300 ring-1 ring-emerald-400/50"
+                        : "bg-white/10 text-white/50"
+                    }`}
+                  >
+                    {hud.cruiseOn ? `${hud.cruiseTarget} km/h` : "OFF"}
+                  </span>
+                </div>
+              </button>
+
+              {/* Popover compact du régulateur (ouvert uniquement au clic) */}
+              {cruiseOpen && (
+                <div className="mt-2 w-44 rounded-2xl border border-white/20 bg-slate-900/95 p-3 text-white shadow-2xl backdrop-blur-md space-y-2">
+                  <div className="flex items-center justify-between border-b border-white/10 pb-1.5">
+                    <span className="text-xs font-bold">⚙️ Régulateur</span>
+                    <button
+                      onClick={() => setCruiseOpen(false)}
+                      className="rounded-lg bg-white/10 px-1.5 py-0.5 text-[10px] hover:bg-white/20"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-white/60">Cible :</span>
+                    <span className="font-black text-emerald-300">{hud.cruiseTarget} km/h</span>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => gameRef.current?.adjustCruise(-5)}
+                      className="flex-1 rounded-xl bg-white/10 py-1 text-xs font-black active:scale-90"
+                    >
+                      − 5
+                    </button>
+                    <button
+                      onClick={() => gameRef.current?.adjustCruise(5)}
+                      className="flex-1 rounded-xl bg-white/10 py-1 text-xs font-black active:scale-90"
+                    >
+                      + 5
+                    </button>
+                  </div>
+                  <button
+                    onClick={() => gameRef.current?.toggleCruise()}
+                    className={`w-full rounded-xl py-2 text-xs font-black transition active:scale-95 ${
+                      hud.cruiseOn
+                        ? "bg-rose-600 text-white shadow-lg shadow-rose-600/30"
+                        : "bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/30"
+                    }`}
+                  >
+                    {hud.cruiseOn ? "Désactiver" : "Activer"}
+                  </button>
+                </div>
               )}
             </div>
           )}
 
-          {/* Heure, météo et vue caméra */}
-          <div className="pointer-events-none absolute left-3 top-[13.5rem] z-10 flex items-center gap-1.5 md:top-52">
-            <div className="rounded-lg bg-black/45 px-2 py-1 text-[11px] font-bold backdrop-blur-md ring-1 ring-white/15">
-              🕒 {hud.clock}
-            </div>
-            <div className="rounded-lg bg-black/45 px-2 py-1 text-[11px] font-bold backdrop-blur-md ring-1 ring-white/15">
-              {hud.weather === "rain" ? "🌧️ Pluie" : hud.weather === "cloudy" ? "⛅ Nuageux" : "☀️ Soleil"}
-            </div>
-            <button
-              onClick={() => gameRef.current?.cycleCamera()}
-              className="pointer-events-auto rounded-lg bg-black/45 px-2 py-1 text-[11px] font-bold backdrop-blur-md ring-1 ring-white/15 active:scale-95"
-            >
-              🎥 {hud.cameraView === "exterieure" ? "Extérieure" : hud.cameraView === "rapprochee" ? "Rapprochée" : "Conduite"}
-            </button>
-          </div>
-
-          {/* Régulateur de vitesse */}
-          {hud.playerMode === "vehicle" && (
-            <div className="pointer-events-auto absolute right-3 bottom-[13.5rem] z-20 flex w-44 flex-col items-stretch gap-1 rounded-2xl bg-black/55 p-2 backdrop-blur-md ring-1 ring-white/15 md:bottom-36">
-              <div className="flex items-baseline justify-between text-[11px]">
-                <span className="text-white/60">Vitesse actuelle :</span>
-                <span className="font-black tabular-nums">{hud.speed} km/h</span>
-              </div>
-              <div className="flex items-baseline justify-between text-[11px]">
-                <span className="text-white/60">Régulateur :</span>
-                <span className={`font-black tabular-nums ${hud.cruiseOn ? "text-emerald-300" : "text-white/40"}`}>
-                  {hud.cruiseOn ? `${hud.cruiseTarget} km/h` : "désactivé"}
-                </span>
-              </div>
-              <button
-                onPointerDown={(e) => {
-                  e.preventDefault();
-                  gameRef.current?.toggleCruise();
-                }}
-                className={`mt-1 w-full rounded-xl px-3 py-2 text-[11px] font-black transition active:scale-95 ${
-                  hud.cruiseOn ? "bg-emerald-400 text-slate-950" : "bg-white/15 text-white"
-                }`}
-              >
-                {hud.cruiseOn ? "Désactiver le régulateur" : "Activer le régulateur"}
-              </button>
-              <div className="flex items-center justify-between gap-1">
+          {/* ================= INTERACTIONS LIEUX & COMMERCES (PIÉTON SEULEMENT) ================= */}
+          {hud.playerMode === "walk" && (hud.nearbyInteraction || hud.nearPoi) && (
+            <div className="pointer-events-auto absolute bottom-20 left-1/2 z-30 -translate-x-1/2 select-none">
+              {hud.nearbyInteraction ? (
                 <button
-                  onPointerDown={(e) => {
-                    e.preventDefault();
-                    gameRef.current?.adjustCruise(-5);
+                  onClick={() => {
+                    if (hud.nearbyInteraction?.id === "tv") {
+                      setTvRemoteOpen(true);
+                    }
+                    gameRef.current?.interact();
                   }}
-                  className="h-9 flex-1 rounded-lg bg-white/15 text-base font-black active:scale-90"
-                  aria-label="Réduire la vitesse cible"
+                  className="flex items-center gap-2.5 rounded-2xl border border-white/25 bg-gradient-to-r from-emerald-600 to-sky-600 px-4 py-2 text-xs font-black text-white shadow-xl shadow-black/50 backdrop-blur-md active:scale-95 animate-pulse"
                 >
-                  − 5
+                  <span className="text-xl">{hud.nearbyInteraction.icon}</span>
+                  <span>{hud.nearbyInteraction.prompt}</span>
+                  <span className="rounded bg-black/30 px-1.5 py-0.5 text-[10px] text-sky-200">
+                    {hud.nearbyInteraction.actionText.toUpperCase()} [E]
+                  </span>
                 </button>
+              ) : hud.nearPoi ? (
                 <button
-                  onPointerDown={(e) => {
-                    e.preventDefault();
-                    gameRef.current?.adjustCruise(5);
+                  onClick={() => {
+                    audio.click();
+                    gameRef.current?.interact();
                   }}
-                  className="h-9 flex-1 rounded-lg bg-white/15 text-base font-black active:scale-90"
-                  aria-label="Augmenter la vitesse cible"
+                  className="flex items-center gap-2 rounded-2xl border border-white/25 bg-gradient-to-r from-amber-400 to-yellow-500 px-4 py-2 text-xs font-black text-black shadow-xl shadow-black/50 backdrop-blur-md active:scale-95"
                 >
-                  + 5
+                  <span className="text-lg">{hud.nearPoi.emoji}</span>
+                  <span>
+                    {hud.nearPoi.type === "shop"
+                      ? "Boutique — véhicules & équipement"
+                      : hud.nearPoi.type === "restaurant"
+                        ? "Manger ici ($8)"
+                        : hud.nearPoi.type === "kiosk"
+                          ? "Buvette ($5)"
+                          : hud.nearPoi.type === "home"
+                            ? "Entrer à la maison"
+                            : hud.nearPoi.type === "market"
+                              ? "Acheter des ingrédients"
+                              : "Activités"}
+                  </span>
+                  <span className="rounded bg-black/20 px-1.5 py-0.5 text-[10px] font-bold">E</span>
                 </button>
-              </div>
-              <div className="text-center text-[9px] text-white/45">Clavier : K · [ ] · frein/recul = arrêt</div>
+              ) : null}
             </div>
           )}
 
@@ -1322,17 +1327,6 @@ export default function App() {
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-function StatChip({ icon, value, color }: { icon: string; value: string; color: string }) {
-  return (
-    <div
-      className={`flex items-center gap-1 rounded-full bg-gradient-to-r ${color} px-2.5 py-1 text-sm font-black text-black shadow-md`}
-    >
-      <span>{icon}</span>
-      <span>{value}</span>
     </div>
   );
 }
