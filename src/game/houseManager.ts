@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { InteractiveTV } from "./interactiveTv";
+import { InteractiveTV, CHANNELS } from "./interactiveTv";
 import { audio } from "./audio";
 import type { Recipe } from "./life";
 import { RECIPES } from "./life";

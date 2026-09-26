@@ -1,6 +1,8 @@
 export type GamePhase = "menu" | "playing" | "paused" | "delivered" | "levelup" | "gameover" | "victory" | "garage" | "jail";
 
 import type { PoiType } from "./districts";
+import type { ContextualInteraction, HouseState } from "./houseManager";
+import type { TvState } from "./interactiveTv";
 
 export interface HudState {
   phase: GamePhase;
@@ -60,6 +62,9 @@ export interface HudState {
   buildingName?: string;
   interiorRoom?: string;
   currentDistrict?: string;
+  nearbyInteraction?: ContextualInteraction | null;
+  houseState?: HouseState;
+  tvState?: TvState;
 }
 
 export interface Upgrades {

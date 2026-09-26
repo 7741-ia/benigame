@@ -34,6 +34,7 @@ import CityMap from "./components/CityMap";
 import Phone from "./components/Phone";
 import ProfilePanel from "./components/ProfilePanel";
 import HomePanel from "./components/HomePanel";
+import TvRemote from "./components/TvRemote";
 import { PWAInstallButton, OfflineIndicator } from "./components/PWAInstallButton";
 
 const defaultHud: HudState = {
@@ -117,7 +118,49 @@ export default function App() {
   const [phoneOpen, setPhoneOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [lifePanel, setLifePanel] = useState<"home" | "market" | "activities" | null>(null);
+  const [tvRemoteOpen, setTvRemoteOpen] = useState(false);
+  const [isPortrait, setIsPortrait] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.innerHeight > window.innerWidth && window.innerWidth < 900;
+  });
+  const [dismissPortraitWarning, setDismissPortraitWarning] = useState(false);
   const toastId = useRef(0);
+
+  useEffect(() => {
+    const handleOrientation = () => {
+      const portrait = window.innerHeight > window.innerWidth && window.innerWidth < 900;
+      setIsPortrait(portrait);
+    };
+
+    try {
+      if (screen.orientation && (screen.orientation as any).lock) {
+        (screen.orientation as any).lock("landscape").catch(() => {});
+      }
+    } catch {
+      /* ignore */
+    }
+
+    window.addEventListener("resize", handleOrientation);
+    window.addEventListener("orientationchange", handleOrientation);
+    return () => {
+      window.removeEventListener("resize", handleOrientation);
+      window.removeEventListener("orientationchange", handleOrientation);
+    };
+  }, []);
+
+  const requestLandscapeFullscreen = async () => {
+    try {
+      if (document.documentElement.requestFullscreen) {
+        await document.documentElement.requestFullscreen();
+      }
+      if (screen.orientation && (screen.orientation as any).lock) {
+        await (screen.orientation as any).lock("landscape");
+      }
+    } catch {
+      /* ignore */
+    }
+    setDismissPortraitWarning(true);
+  };
 
   // PWA install prompt detection
   useEffect(() => {
@@ -472,7 +515,22 @@ export default function App() {
       {/* ================= IN-GAME HUD ================= */}
       {(phase === "playing" || phase === "paused") && (
         <>
-          <TouchControls onInput={handleTouch} mode={hud.playerMode} />
+          <TouchControls
+            onInput={handleTouch}
+            mode={hud.playerMode}
+            canEnterVehicle={hud.canEnterVehicle}
+            canInteract={!!hud.nearPoi || !!hud.buildingName || !!hud.nearbyInteraction}
+            nearbyInteraction={hud.nearbyInteraction}
+            running={hud.running}
+            onToggleVehicle={() => gameRef.current?.toggleVehicleMode()}
+            onToggleRun={() => gameRef.current?.toggleRun()}
+            onInteract={() => {
+              if (hud.nearbyInteraction?.id === "tv") {
+                setTvRemoteOpen(true);
+              }
+              gameRef.current?.interact();
+            }}
+          />
 
           {/* Top-left: stats + timer + progress */}
           <div className="pointer-events-none absolute left-3 top-3 z-10 flex flex-col gap-2">
@@ -618,8 +676,27 @@ export default function App() {
             </div>
           </div>
 
-          {/* Commerces à proximité : boutique / restaurant / kiosque */}
-          {hud.nearPoi && (
+          {/* Interaction contextuelle intelligente (Maison 3D, TV, Lit, Cuisine, Douche...) */}
+          {hud.nearbyInteraction ? (
+            <div className="pointer-events-auto absolute bottom-[12.5rem] left-1/2 z-30 -translate-x-1/2 md:bottom-[5.5rem]">
+              <button
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  if (hud.nearbyInteraction?.id === "tv") {
+                    setTvRemoteOpen(true);
+                  }
+                  gameRef.current?.interact();
+                }}
+                className="flex items-center gap-2.5 rounded-2xl bg-gradient-to-r from-emerald-500 to-sky-500 px-5 py-3 text-sm font-black text-white shadow-xl shadow-emerald-950/60 ring-2 ring-white/30 active:scale-95 animate-pulse"
+              >
+                <span className="text-2xl">{hud.nearbyInteraction.icon}</span>
+                <span>{hud.nearbyInteraction.prompt}</span>
+                <span className="rounded-lg bg-black/30 px-2 py-0.5 text-xs font-bold text-sky-200">
+                  {hud.nearbyInteraction.actionText.toUpperCase()} [E]
+                </span>
+              </button>
+            </div>
+          ) : hud.nearPoi ? (
             <div className="pointer-events-auto absolute bottom-[12.5rem] left-1/2 z-30 -translate-x-1/2 md:bottom-[5.5rem]">
               <button
                 onPointerDown={(e) => {
@@ -648,7 +725,7 @@ export default function App() {
                 <span className="rounded bg-black/20 px-1.5 py-0.5 text-[10px]">E</span>
               </button>
             </div>
-          )}
+          ) : null}
 
           {/* Étape de livraison : se garer, descendre, remettre le colis */}
           {hud.deliveryPrompt && (
@@ -1164,6 +1241,45 @@ export default function App() {
           onBuyFurniture={buyFurniture}
           onParty={hostParty}
         />
+      )}
+
+      {/* ================= TÉLÉCOMMANDE TV ================= */}
+      {tvRemoteOpen && (
+        <TvRemote
+          tvState={hud.tvState}
+          onTogglePower={() => gameRef.current?.tvTogglePower()}
+          onNextChannel={() => gameRef.current?.tvNextChannel()}
+          onPrevChannel={() => gameRef.current?.tvPrevChannel()}
+          onVolumeChange={(v) => gameRef.current?.tvSetVolume(v)}
+          onClose={() => setTvRemoteOpen(false)}
+        />
+      )}
+
+      {/* ================= AVERTISSEMENT MODE PAYSAGE ================= */}
+      {isPortrait && !dismissPortraitWarning && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/85 p-6 backdrop-blur-md text-white select-none">
+          <div className="max-w-sm w-full rounded-3xl bg-slate-900/95 p-6 text-center ring-1 ring-sky-400/40 shadow-2xl space-y-4">
+            <div className="text-5xl animate-bounce">📱 🔄</div>
+            <h3 className="text-xl font-black tracking-wide text-sky-400">Mode Paysage Recommandé</h3>
+            <p className="text-sm text-white/80 leading-relaxed">
+              Pour une ergonomie de conduite optimale et un meilleur confort visuel dans la ville de Beni, basculez votre téléphone en mode paysage.
+            </p>
+            <div className="flex flex-col gap-2 pt-2">
+              <button
+                onClick={requestLandscapeFullscreen}
+                className="w-full rounded-2xl bg-gradient-to-r from-sky-500 to-emerald-500 py-3 text-sm font-black text-slate-950 shadow-lg active:scale-95 transition-all"
+              >
+                Plein Écran Paysage
+              </button>
+              <button
+                onClick={() => setDismissPortraitWarning(true)}
+                className="w-full rounded-2xl bg-white/10 py-2.5 text-xs font-semibold text-white/70 hover:bg-white/15 active:scale-95"
+              >
+                Continuer en portrait
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ================= JAIL ================= */}

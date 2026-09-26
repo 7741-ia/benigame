@@ -24,6 +24,7 @@ import {
   type Pose,
   type CharacterLook,
 } from "./character";
+import { houseManager, type ContextualInteraction } from "./houseManager";
 
 /** bulle de texte flottante (« Merci ! ») avec fondu */
 interface Bubble {
@@ -282,6 +283,7 @@ export class Game {
   private runToggled = false;
   private currentBuilding: VisitableBuilding | null = null;
   private currentRoom: { name: string; x: number; z: number; icon: string } | null = null;
+  private nearbyInteraction: ContextualInteraction | null = null;
 
   constructor(canvas: HTMLCanvasElement, cb: Callbacks) {
     this.canvas = canvas;
@@ -1669,7 +1671,7 @@ export class Game {
       if (this.bikeRider) this.bikeRider.visible = false;
       this.packageMesh.visible = false;
       this.walkerPackage.visible = this.hasPackage;
-      audio.updateEngine(0);
+      audio.stopEngine();
       audio.vehicleExit();
     } else {
       const dx = this.pos.x - this.bike.position.x;
@@ -1714,9 +1716,10 @@ export class Game {
         this.walker.visible = false;
         if (this.bikeRider) this.bikeRider.visible = this.cameraView !== "conduite";
         this.packageMesh.visible = this.hasPackage;
-        audio.startEngine();
+        audio.startEngine(this.vehicle.bodyType === "van" ? "van" : this.vehicle.bodyType === "sport" ? "car" : "moto");
       } else {
         this.walker.position.copy(this.mountTo);
+        audio.stopEngine();
       }
       this.emitHud();
     }
@@ -1771,6 +1774,10 @@ export class Game {
     this.homeRoom = "bedroom";
     this.fatigue = 0;
     this.hunger = Math.min(100, this.hunger + 12);
+    if (this.env) {
+      this.env.setHour((this.env.hour + 7) % 24);
+    }
+    audio.levelup();
     this.emitHud();
   }
 
@@ -1796,6 +1803,26 @@ export class Game {
 
   enterHomeRoom(room: HudState["homeRoom"]) {
     this.homeRoom = room;
+    this.emitHud();
+  }
+
+  tvTogglePower() {
+    houseManager.tv.togglePower();
+    this.emitHud();
+  }
+
+  tvNextChannel() {
+    houseManager.tv.nextChannel();
+    this.emitHud();
+  }
+
+  tvPrevChannel() {
+    houseManager.tv.prevChannel();
+    this.emitHud();
+  }
+
+  tvSetVolume(vol: number) {
+    houseManager.tv.setVolume(vol);
     this.emitHud();
   }
 
@@ -1837,7 +1864,7 @@ export class Game {
   pause() {
     if (this.phase === "playing") {
       this.phase = "paused";
-      audio.updateEngine(0);
+      audio.stopEngine();
       this.emitHud();
     }
   }
@@ -1943,6 +1970,55 @@ export class Game {
     if (this.deliveryStage === "handover" || this.mountT > 0) return null;
     if (Math.abs(this.speed) > 3) return null;
 
+    // 1. Interaction contextuelle intelligente (Maison, portes, TV, cuisine, douche, lit...)
+    if (this.nearbyInteraction) {
+      const act = this.nearbyInteraction.id;
+      if (act === "frontDoor") {
+        houseManager.toggleFrontDoor();
+      } else if (act === "bedroomDoor") {
+        houseManager.toggleBedroomDoor();
+      } else if (act === "bathroomDoor") {
+        houseManager.toggleBathroomDoor();
+      } else if (act === "tv") {
+        if (!houseManager.tv.isOn) houseManager.tv.togglePower();
+        else houseManager.tv.nextChannel();
+      } else if (act === "sofa") {
+        const isSat = houseManager.toggleSit("sofa");
+        if (isSat) this.fatigue = Math.max(0, this.fatigue - 15);
+      } else if (act === "bed") {
+        this.sleepAtHome();
+      } else if (act === "fridge") {
+        houseManager.toggleFridge();
+        this.hunger = Math.max(0, this.hunger - 15);
+      } else if (act === "stove") {
+        houseManager.cookMeal("Makemba");
+        this.hunger = 0;
+        this.fatigue = Math.max(0, this.fatigue - 10);
+      } else if (act === "sink") {
+        houseManager.toggleTap();
+      } else if (act === "dining") {
+        const meal = houseManager.eatServedMeal();
+        if (meal) {
+          this.hunger = 0;
+          this.fatigue = Math.max(0, this.fatigue - 20);
+        } else {
+          houseManager.toggleSit("table");
+        }
+      } else if (act === "shower") {
+        const showering = houseManager.startShower();
+        if (showering) {
+          this.fatigue = Math.max(0, this.fatigue - 30);
+          this.hunger = Math.min(100, this.hunger + 4);
+        }
+      } else if (act === "toilet") {
+        houseManager.flushToilet();
+      } else if (act === "light") {
+        houseManager.toggleLights();
+      }
+      this.emitHud();
+      return "home";
+    }
+
     // Interaction dans les intérieurs 3D de bâtiments visitables
     if (this.currentBuilding) {
       audio.click();
@@ -1997,7 +2073,7 @@ export class Game {
     } else {
       // Life activities are handled by React panels while the 3D world is paused.
       this.phase = "paused";
-      audio.updateEngine(0);
+      audio.stopEngine();
       this.emitHud();
     }
     this.cb.onPoiUsed?.(poi.type, poi.name);
@@ -2101,6 +2177,7 @@ export class Game {
     this.raf = requestAnimationFrame(this.loop);
     const dt = Math.min(this.clock.getDelta(), 0.05);
     this.gameTime += dt;
+    houseManager.update(dt);
     if (this.phase === "playing" || this.phase === "jail") {
       this.update(dt);
     } else {
@@ -2605,8 +2682,14 @@ export class Game {
     // caméra de poursuite
     this.updateCamera(dt, fx, fz);
 
-    // son moteur
-    audio.updateEngine(Math.min(1, Math.abs(this.speed) / maxSpeed));
+    // son moteur synchronisé
+    const isAcc = (this.keys["w"] || this.keys["arrowup"] || this.touchThrottle > 0) && this.speed >= 0;
+    audio.updateEngine(
+      Math.min(1, Math.abs(this.speed) / maxSpeed),
+      this.vehicle.bodyType === "van" ? "van" : this.vehicle.bodyType === "sport" ? "car" : "moto",
+      isAcc,
+      0
+    );
 
     // HUD limité à ~15 fps
     this.hudAccum += dt;
@@ -2700,6 +2783,21 @@ export class Game {
       }
     }
 
+    // Moteur toujours coupé à pied (jamais de son moteur en arrière-plan)
+    audio.stopEngine();
+
+    // Détection intelligente de l'objet interactif le plus proche (maison, portes, etc.)
+    this.nearbyInteraction = houseManager.getClosestInteraction(nx, nz);
+
+    // Gestion de la posture assise (canapé, table)
+    if (houseManager.state.isSitting) {
+      if (moved > 0.04) {
+        houseManager.state.isSitting = false;
+        houseManager.state.sittingTarget = null;
+        audio.sitDown();
+      }
+    }
+
     // Détection des bâtiments visitables et pièces intérieures
     this.currentBuilding = null;
     this.currentRoom = null;
@@ -2725,7 +2823,7 @@ export class Game {
     }
 
     // animation : la foulée suit la distance réellement parcourue (aucun glissement)
-    let pose: Pose = moved > 0.002 ? (running ? "run" : "walk") : "idle";
+    let pose: Pose = houseManager.state.isSitting ? "sit" : moved > 0.002 ? (running ? "run" : "walk") : "idle";
     if (this.socialAnimTimer > 0) {
       this.socialAnimTimer -= dt;
       pose = this.socialPose;
@@ -3273,7 +3371,9 @@ export class Game {
       buildingName: this.currentBuilding ? this.currentBuilding.name : undefined,
       interiorRoom: this.currentRoom ? this.currentRoom.name : undefined,
       deliveryPrompt:
-        this.currentBuilding
+        this.nearbyInteraction
+          ? `${this.nearbyInteraction.icon} ${this.nearbyInteraction.prompt} [E]`
+          : this.currentBuilding
           ? this.currentBuilding.id === "home"
             ? this.currentRoom?.name === "Chambre"
               ? "Appuyer sur [E] pour dormir et récupérer"
@@ -3302,6 +3402,9 @@ export class Game {
                 : "",
       currentDistrict: getDistrictAt(this.pos.x, this.pos.y),
       homeRoom: this.homeRoom,
+      nearbyInteraction: this.nearbyInteraction,
+      houseState: houseManager.state,
+      tvState: houseManager.tv.getState(),
     });
   }
 

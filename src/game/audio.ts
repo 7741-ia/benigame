@@ -310,9 +310,13 @@ export class AudioEngine {
     }, 120);
   }
 
+  getCurrentVehicleType(): "moto" | "van" | "car" {
+    return this.currentVehicleType;
+  }
+
   updateEngine(
     speed01: number,
-    vehicleType: "moto" | "van" | "car" = "moto",
+    vehicleType?: "moto" | "van" | "car",
     isAccelerating = false,
     distanceToPlayer = 0
   ) {
@@ -328,8 +332,9 @@ export class AudioEngine {
     }
 
     const t = this.ctx.currentTime;
-    const isMoto = vehicleType === "moto";
-    const isVan = vehicleType === "van";
+    const vType = vehicleType || this.currentVehicleType;
+    const isMoto = vType === "moto";
+    const isVan = vType === "van";
 
     // Atténuation selon la distance si le joueur n'est pas sur le véhicule
     const distAtten = distanceToPlayer > 0 ? Math.max(0, 1 - distanceToPlayer / 12) : 1;
