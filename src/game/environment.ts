@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { makeClouds, makeRainStreak } from "./textures";
+import { makeClouds, makeRainStreak, makeRainSplash, makeFogPuff, makeCloudShadowMap } from "./textures";
 
 export type Weather = "sunny" | "cloudy" | "rain" | "fog";
 export type Quality = "low" | "medium" | "high";
@@ -43,9 +43,34 @@ export class Environment {
   private sky: THREE.Mesh;
   private clouds: THREE.Mesh;
   private cloudMat: THREE.MeshBasicMaterial;
+
+  // Gouttes de pluie tombantes
   private rain: THREE.Points;
+  private rainCount = 2400;
   private rainPos: Float32Array;
   private rainMat: THREE.PointsMaterial;
+
+  // Éclaboussures d'impact de pluie au sol
+  private rainSplashes: THREE.Points;
+  private splashCount = 550;
+  private splashPos: Float32Array;
+  private splashVel: Float32Array;
+  private splashLife: Float32Array;
+  private splashMat: THREE.PointsMaterial;
+
+  // Nappes de brume et brouillard volumétrique
+  private fogParticles: THREE.Points;
+  private fogCount = 160;
+  private fogPos: Float32Array;
+  private fogVel: Float32Array;
+  private fogPhase: Float32Array;
+  private fogMat: THREE.PointsMaterial;
+
+  // Ombres de nuages glissant sur le sol
+  private groundShadow: THREE.Mesh;
+  private groundShadowMat: THREE.MeshBasicMaterial;
+  private groundShadowTex: THREE.CanvasTexture;
+
   private stars: THREE.Points;
   private starsMat: THREE.PointsMaterial;
   private sunDir = new THREE.Vector3(0.4, 0.8, 0.3);
@@ -122,7 +147,7 @@ export class Environment {
     this.stars.renderOrder = -9;
     scene.add(this.stars);
 
-    // ── Nuages tropicaux en dérive ──
+    // ── Nuages tropicaux en dérive dans le ciel ──
     this.cloudMat = new THREE.MeshBasicMaterial({
       map: makeClouds(),
       transparent: true,
@@ -137,28 +162,104 @@ export class Environment {
     this.clouds.renderOrder = -5;
     scene.add(this.clouds);
 
-    // ── Pluie tropicale battante ──
-    const n = 1600;
+    // ── Ombres portées des nuages glissant au sol ──
+    this.groundShadowTex = makeCloudShadowMap();
+    this.groundShadowMat = new THREE.MeshBasicMaterial({
+      map: this.groundShadowTex,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      color: 0x060c14,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
+    });
+    this.groundShadow = new THREE.Mesh(new THREE.PlaneGeometry(2400, 2400), this.groundShadowMat);
+    this.groundShadow.rotation.x = -Math.PI / 2;
+    this.groundShadow.position.y = 0.032;
+    this.groundShadow.renderOrder = -4;
+    scene.add(this.groundShadow);
+
+    // ── Gouttes de pluie tropicale inclinées ──
+    const n = this.rainCount;
     this.rainPos = new Float32Array(n * 3);
     for (let i = 0; i < n; i++) {
-      this.rainPos[i * 3] = (Math.random() - 0.5) * 85;
-      this.rainPos[i * 3 + 1] = Math.random() * 45;
-      this.rainPos[i * 3 + 2] = (Math.random() - 0.5) * 85;
+      this.rainPos[i * 3] = (Math.random() - 0.5) * 110;
+      this.rainPos[i * 3 + 1] = Math.random() * 52;
+      this.rainPos[i * 3 + 2] = (Math.random() - 0.5) * 110;
     }
     const rg = new THREE.BufferGeometry();
     rg.setAttribute("position", new THREE.BufferAttribute(this.rainPos, 3));
     this.rainMat = new THREE.PointsMaterial({
       map: makeRainStreak(),
-      size: 1.1,
+      size: 1.25,
       transparent: true,
       opacity: 0,
       depthWrite: false,
-      color: 0xdfe9f5,
+      color: 0xdfeaf7,
     });
     this.rain = new THREE.Points(rg, this.rainMat);
     this.rain.frustumCulled = false;
     this.rain.visible = false;
     scene.add(this.rain);
+
+    // ── Particules d'éclaboussures de pluie au sol ──
+    const sn = this.splashCount;
+    this.splashPos = new Float32Array(sn * 3);
+    this.splashVel = new Float32Array(sn * 3);
+    this.splashLife = new Float32Array(sn);
+    for (let i = 0; i < sn; i++) {
+      this.splashPos[i * 3] = (Math.random() - 0.5) * 80;
+      this.splashPos[i * 3 + 1] = 0.04 + Math.random() * 0.1;
+      this.splashPos[i * 3 + 2] = (Math.random() - 0.5) * 80;
+      this.splashVel[i * 3] = (Math.random() - 0.5) * 1.5;
+      this.splashVel[i * 3 + 1] = 0.8 + Math.random() * 1.4;
+      this.splashVel[i * 3 + 2] = (Math.random() - 0.5) * 1.5;
+      this.splashLife[i] = Math.random() * 0.2;
+    }
+    const sg = new THREE.BufferGeometry();
+    sg.setAttribute("position", new THREE.BufferAttribute(this.splashPos, 3));
+    this.splashMat = new THREE.PointsMaterial({
+      map: makeRainSplash(),
+      size: 1.5,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      color: 0xd6e8fa,
+    });
+    this.rainSplashes = new THREE.Points(sg, this.splashMat);
+    this.rainSplashes.frustumCulled = false;
+    this.rainSplashes.visible = false;
+    scene.add(this.rainSplashes);
+
+    // ── Particules de brume / brouillard volumétrique au sol ──
+    const fn = this.fogCount;
+    this.fogPos = new Float32Array(fn * 3);
+    this.fogVel = new Float32Array(fn * 3);
+    this.fogPhase = new Float32Array(fn);
+    for (let i = 0; i < fn; i++) {
+      this.fogPos[i * 3] = (Math.random() - 0.5) * 150;
+      this.fogPos[i * 3 + 1] = 1.0 + Math.random() * 2.8;
+      this.fogPos[i * 3 + 2] = (Math.random() - 0.5) * 150;
+      this.fogVel[i * 3] = 0.4 + Math.random() * 0.6;
+      this.fogVel[i * 3 + 1] = 0;
+      this.fogVel[i * 3 + 2] = 0.2 + Math.random() * 0.4;
+      this.fogPhase[i] = Math.random() * Math.PI * 2;
+    }
+    const fg = new THREE.BufferGeometry();
+    fg.setAttribute("position", new THREE.BufferAttribute(this.fogPos, 3));
+    this.fogMat = new THREE.PointsMaterial({
+      map: makeFogPuff(),
+      size: 24,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      color: 0xdae6f2,
+    });
+    this.fogParticles = new THREE.Points(fg, this.fogMat);
+    this.fogParticles.frustumCulled = false;
+    this.fogParticles.visible = false;
+    scene.add(this.fogParticles);
 
     scene.add(sun.target);
   }
@@ -166,6 +267,9 @@ export class Environment {
   setQuality(q: Quality) {
     this.quality = q;
     this.clouds.visible = q !== "low";
+    this.groundShadow.visible = q !== "low" && this.groundShadowMat.opacity > 0.01;
+    this.fogParticles.visible = this.fogMat.opacity > 0.008;
+    this.rainSplashes.visible = this.splashMat.opacity > 0.01;
   }
 
   setHour(h: number) {
@@ -182,15 +286,69 @@ export class Environment {
     this.weather = w;
     this.weatherTimer = 140 + Math.random() * 120;
     if (instant) {
-      this.cloudCover = w === "sunny" ? 0.2 : w === "cloudy" ? 0.8 : w === "fog" ? 0.6 : 1;
-      this.wetness = w === "rain" ? 1 : 0;
+      this.cloudCover = w === "sunny" ? 0.2 : w === "cloudy" ? 0.85 : w === "fog" ? 0.6 : 1;
+      this.wetness = w === "rain" ? 1 : w === "cloudy" ? 0.25 : w === "fog" ? 0.2 : 0;
       this.rainMat.opacity = w === "rain" ? 0.75 : 0;
+      this.splashMat.opacity = w === "rain" ? 0.8 : 0;
+      this.fogMat.opacity = w === "fog" ? (this.quality === "low" ? 0.22 : 0.36) : 0;
+      const isDay = this.hour > 6 && this.hour < 18;
+      this.groundShadowMat.opacity = isDay
+        ? (w === "rain" ? 0.44 : w === "cloudy" ? 0.38 : w === "fog" ? 0.08 : 0.16)
+        : 0;
     }
   }
 
-  /** Adhérence des pneus : 1 = sol sec, ~0.68 sous forte pluie */
-  gripFactor() {
-    return 1 - this.wetness * 0.32;
+  /** Adhérence des pneus : 1 = sol sec, ~0.82 sous nuages denses, ~0.55 sous forte pluie */
+  gripFactor(): number {
+    if (this.weather === "rain") {
+      // Sol inondé / aquaplaning : forte perte d'adhérence
+      return Math.max(0.5, 1 - (0.28 + this.wetness * 0.17));
+    }
+    if (this.weather === "cloudy") {
+      // Temps très couvert, brumasse et condensation sur l'asphalte
+      const coverNorm = Math.min(1, this.cloudCover / 0.8);
+      return Math.max(0.78, 1 - 0.18 * coverNorm);
+    }
+    if (this.weather === "fog") {
+      return 0.78;
+    }
+    // Temps sec / ensoleillé (légère glisse si la pluie vient de cesser)
+    return Math.max(0.75, 1 - this.wetness * 0.25);
+  }
+
+  /** Facteur de vitesse de pointe selon la météo (pluie ou nuages lourds réduisent la vitesse max) */
+  weatherSpeedFactor(): number {
+    if (this.weather === "rain") {
+      // Pluie battante : vitesse réduite de ~28%
+      return Math.max(0.68, 1 - (0.18 + this.wetness * 0.1));
+    }
+    if (this.weather === "cloudy") {
+      // Nuages denses / temps lourd : vitesse ralentie de ~12%
+      const coverNorm = Math.min(1, this.cloudCover / 0.8);
+      return Math.max(0.85, 1 - 0.12 * coverNorm);
+    }
+    if (this.weather === "fog") {
+      // Brume / brouillard : visibilité et vitesse réduites (-16%)
+      return 0.84;
+    }
+    return 1.0;
+  }
+
+  /** Facteur d'accélération selon la météo (motricité au démarrage et reprises) */
+  weatherAccelFactor(): number {
+    if (this.weather === "rain") {
+      // Patinage des roues sur asphalte détrempé : accélération réduite de ~32%
+      return Math.max(0.65, 1 - (0.2 + this.wetness * 0.12));
+    }
+    if (this.weather === "cloudy") {
+      // Nuages denses : motricité diminuée de ~15%
+      const coverNorm = Math.min(1, this.cloudCover / 0.8);
+      return Math.max(0.82, 1 - 0.15 * coverNorm);
+    }
+    if (this.weather === "fog") {
+      return 0.8;
+    }
+    return 1.0;
   }
 
   private sample(hour: number): SkyKey {
@@ -232,7 +390,7 @@ export class Environment {
     const targetCloud = this.weather === "sunny" ? 0.2 : this.weather === "cloudy" ? 0.8 : this.weather === "fog" ? 0.6 : 1;
     this.cloudCover += (targetCloud - this.cloudCover) * Math.min(1, dt * 0.15);
     this.clouds.visible = this.quality !== "low";
-    const targetWet = this.weather === "rain" ? 1 : 0;
+    const targetWet = this.weather === "rain" ? 1 : this.weather === "cloudy" ? 0.28 : this.weather === "fog" ? 0.2 : 0;
     this.wetness += (targetWet - this.wetness) * Math.min(1, dt * (targetWet ? 0.12 : 0.035));
 
     // Position du soleil et de la lune
@@ -259,29 +417,126 @@ export class Environment {
 
     this.hemi.intensity = k.hemiI * (1 - this.cloudCover * 0.25);
 
-    // Dérive des nuages
+    // Dérive des nuages dans le ciel
     this.clouds.position.x = focus.x + (Date.now() * 0.002) % 400;
     this.clouds.position.z = focus.z + (Date.now() * 0.001) % 400;
     this.cloudMat.opacity = THREE.MathUtils.lerp(0.2, 0.65, this.cloudCover);
+
+    // Ombres portées des nuages glissant sur le sol
+    if (this.groundShadow) {
+      this.groundShadow.position.set(focus.x, 0.032, focus.z);
+      this.groundShadowTex.offset.x = (this.groundShadowTex.offset.x + dt * 0.006) % 1;
+      this.groundShadowTex.offset.y = (this.groundShadowTex.offset.y + dt * 0.003) % 1;
+
+      let targetShadow = 0;
+      if (isDay && elev > 0.03 && this.quality !== "low") {
+        if (this.weather === "rain") targetShadow = 0.44;
+        else if (this.weather === "cloudy") targetShadow = 0.38;
+        else if (this.weather === "fog") targetShadow = 0.08;
+        else targetShadow = 0.16; // soleil : ombres de cumulus éparses
+      }
+      this.groundShadowMat.opacity += (targetShadow - this.groundShadowMat.opacity) * Math.min(1, dt * 1.8);
+      this.groundShadow.visible = this.quality !== "low" && this.groundShadowMat.opacity > 0.01;
+    }
 
     // Étoiles de nuit
     this.starsMat.opacity = Math.max(0, (this.nightFactor - 0.45) * 1.8);
     this.stars.position.copy(focus);
 
-    // Animation de la pluie
+    // Animation de la pluie (gouttes tropicales inclinées avec le vent)
     const isRaining = this.weather === "rain";
     const targetRainOp = isRaining ? 0.75 : 0;
     this.rainMat.opacity += (targetRainOp - this.rainMat.opacity) * Math.min(1, dt * 2.5);
     this.rain.visible = this.rainMat.opacity > 0.01;
 
+    const windX = 6;
+    const windZ = 2.5;
+
     if (this.rain.visible) {
       this.rain.position.set(focus.x, 0, focus.z);
       const pos = this.rainPos;
-      for (let i = 0; i < pos.length / 3; i++) {
-        pos[i * 3 + 1] -= dt * 45;
-        if (pos[i * 3 + 1] < 0) pos[i * 3 + 1] += 42;
+      const count = this.rainCount;
+      const fallSpeed = 54;
+      for (let i = 0; i < count; i++) {
+        pos[i * 3] += dt * windX;
+        pos[i * 3 + 1] -= dt * fallSpeed;
+        pos[i * 3 + 2] += dt * windZ;
+
+        if (pos[i * 3] > 55) pos[i * 3] -= 110;
+        else if (pos[i * 3] < -55) pos[i * 3] += 110;
+
+        if (pos[i * 3 + 2] > 55) pos[i * 3 + 2] -= 110;
+        else if (pos[i * 3 + 2] < -55) pos[i * 3 + 2] += 110;
+
+        if (pos[i * 3 + 1] < 0) {
+          pos[i * 3 + 1] = 46 + Math.random() * 6;
+        }
       }
       this.rain.geometry.attributes.position.needsUpdate = true;
+    }
+
+    // Particules d'éclaboussures de pluie au sol
+    const targetSplashOp = isRaining ? 0.8 : (this.wetness > 0.4 ? 0.35 : 0);
+    this.splashMat.opacity += (targetSplashOp - this.splashMat.opacity) * Math.min(1, dt * 3.0);
+    this.rainSplashes.visible = this.splashMat.opacity > 0.01;
+
+    if (this.rainSplashes.visible) {
+      this.rainSplashes.position.set(focus.x, 0, focus.z);
+      const spos = this.splashPos;
+      const svel = this.splashVel;
+      const slife = this.splashLife;
+      const scount = this.splashCount;
+
+      for (let i = 0; i < scount; i++) {
+        slife[i] -= dt;
+        svel[i * 3 + 1] -= dt * 9.8;
+        spos[i * 3] += svel[i * 3] * dt;
+        spos[i * 3 + 1] += svel[i * 3 + 1] * dt;
+        spos[i * 3 + 2] += svel[i * 3 + 2] * dt;
+
+        if (slife[i] <= 0 || spos[i * 3 + 1] < 0.03) {
+          spos[i * 3] = (Math.random() - 0.5) * 80;
+          spos[i * 3 + 1] = 0.04 + Math.random() * 0.05;
+          spos[i * 3 + 2] = (Math.random() - 0.5) * 80;
+          svel[i * 3] = (Math.random() - 0.5) * 1.6 + windX * 0.12;
+          svel[i * 3 + 1] = 0.9 + Math.random() * 1.5;
+          svel[i * 3 + 2] = (Math.random() - 0.5) * 1.6 + windZ * 0.12;
+          slife[i] = 0.14 + Math.random() * 0.16;
+        }
+      }
+      this.rainSplashes.geometry.attributes.position.needsUpdate = true;
+    }
+
+    // Nappes de brume et brouillard volumétrique au ras du sol
+    const isFoggy = this.weather === "fog";
+    const isMorningMist = this.hour >= 5.5 && this.hour <= 7.2;
+    const targetFogOp = isFoggy ? (this.quality === "low" ? 0.22 : 0.36) : (isMorningMist ? 0.14 : 0);
+    this.fogMat.opacity += (targetFogOp - this.fogMat.opacity) * Math.min(1, dt * 1.6);
+    this.fogParticles.visible = this.fogMat.opacity > 0.008;
+
+    if (this.fogParticles.visible) {
+      this.fogParticles.position.set(focus.x, 0, focus.z);
+      const fpos = this.fogPos;
+      const fvel = this.fogVel;
+      const fphase = this.fogPhase;
+      const fcount = this.fogCount;
+      const t = Date.now() * 0.001;
+
+      // Teinte de la brume harmonisée avec l'horizon
+      this.fogMat.color.setHex(k.horizon);
+
+      for (let i = 0; i < fcount; i++) {
+        fpos[i * 3] += (fvel[i * 3] + Math.sin(t * 0.4 + fphase[i]) * 0.35) * dt;
+        fpos[i * 3 + 1] = 1.6 + Math.sin(t * 0.6 + fphase[i]) * 0.8;
+        fpos[i * 3 + 2] += (fvel[i * 3 + 2] + Math.cos(t * 0.3 + fphase[i]) * 0.35) * dt;
+
+        if (fpos[i * 3] > 75) fpos[i * 3] -= 150;
+        else if (fpos[i * 3] < -75) fpos[i * 3] += 150;
+
+        if (fpos[i * 3 + 2] > 75) fpos[i * 3 + 2] -= 150;
+        else if (fpos[i * 3 + 2] < -75) fpos[i * 3 + 2] += 150;
+      }
+      this.fogParticles.geometry.attributes.position.needsUpdate = true;
     }
 
     // Teinte du ciel

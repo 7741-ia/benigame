@@ -249,12 +249,123 @@ export function makeRainStreak() {
   const { c, ctx } = canvas(32);
   const g = ctx.createLinearGradient(0, 0, 0, 32);
   g.addColorStop(0, "rgba(255,255,255,0)");
-  g.addColorStop(0.5, "rgba(220,235,255,0.9)");
+  g.addColorStop(0.2, "rgba(210,230,255,0.7)");
+  g.addColorStop(0.8, "rgba(235,245,255,0.95)");
   g.addColorStop(1, "rgba(255,255,255,0)");
   ctx.fillStyle = g;
-  ctx.fillRect(14, 0, 4, 32);
+  ctx.fillRect(13, 0, 6, 32);
   const tex = new THREE.CanvasTexture(c);
   tex.needsUpdate = true;
+  return tex;
+}
+
+/** Éclaboussure d'impact de goutte de pluie au sol (ondelette circulaire + micro-projections) */
+export function makeRainSplash() {
+  const size = 64;
+  const { c, ctx } = canvas(size);
+  ctx.clearRect(0, 0, size, size);
+
+  // Ondelette circulaire d'impact
+  const gRing = ctx.createRadialGradient(size / 2, size / 2, 2, size / 2, size / 2, size / 2 - 2);
+  gRing.addColorStop(0, "rgba(230, 245, 255, 0.95)");
+  gRing.addColorStop(0.3, "rgba(190, 225, 255, 0.75)");
+  gRing.addColorStop(0.7, "rgba(150, 205, 255, 0.35)");
+  gRing.addColorStop(1, "rgba(255, 255, 255, 0)");
+  ctx.fillStyle = gRing;
+  ctx.beginPath();
+  ctx.arc(size / 2, size / 2, size / 2 - 2, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Micro-gouttelettes expulsées lors de l'impact
+  const rnd = mulberry(19);
+  for (let i = 0; i < 8; i++) {
+    const ang = (i / 8) * Math.PI * 2 + (rnd() - 0.5) * 0.45;
+    const dist = 10 + rnd() * 16;
+    const px = size / 2 + Math.cos(ang) * dist;
+    const py = size / 2 + Math.sin(ang) * dist;
+    const pr = 1.2 + rnd() * 1.6;
+    ctx.fillStyle = "rgba(240, 248, 255, 0.85)";
+    ctx.beginPath();
+    ctx.arc(px, py, pr, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.needsUpdate = true;
+  return tex;
+}
+
+/** Volute de brume / brouillard volumétrique douce (multi-lobes vaporeux) */
+export function makeFogPuff(seed = 42) {
+  const size = 128;
+  const { c, ctx } = canvas(size);
+  const rnd = mulberry(seed);
+  ctx.clearRect(0, 0, size, size);
+
+  for (let i = 0; i < 14; i++) {
+    const cx = size / 2 + (rnd() - 0.5) * 44;
+    const cy = size / 2 + (rnd() - 0.5) * 44;
+    const r = 26 + rnd() * 34;
+    const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+    g.addColorStop(0, "rgba(240, 248, 255, 0.35)");
+    g.addColorStop(0.45, "rgba(220, 235, 250, 0.18)");
+    g.addColorStop(1, "rgba(210, 228, 245, 0)");
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.needsUpdate = true;
+  return tex;
+}
+
+/** Carte d'ombres de nuages projetées au sol (ombres douces et étirées avec pénombre) */
+export function makeCloudShadowMap(seed = 93) {
+  const size = 512;
+  const { c, ctx } = canvas(size);
+  const rnd = mulberry(seed);
+  ctx.clearRect(0, 0, size, size);
+
+  // Amas d'ombres cumuliformes
+  for (let k = 0; k < 42; k++) {
+    const cx = rnd() * size;
+    const cy = rnd() * size;
+    const rx = 40 + rnd() * 80;
+    const ry = rx * (0.6 + rnd() * 0.7);
+    const rot = rnd() * Math.PI;
+
+    const g = ctx.createRadialGradient(0, 0, 0, 0, 0, rx);
+    g.addColorStop(0, "rgba(0, 0, 0, 0.85)");
+    g.addColorStop(0.5, "rgba(0, 0, 0, 0.45)");
+    g.addColorStop(1, "rgba(0, 0, 0, 0)");
+
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(rot);
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // Taches secondaires pour combler et estomper
+  for (let k = 0; k < 28; k++) {
+    const cx = rnd() * size;
+    const cy = rnd() * size;
+    const r = 25 + rnd() * 45;
+    const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+    g.addColorStop(0, "rgba(0, 0, 0, 0.6)");
+    g.addColorStop(1, "rgba(0, 0, 0, 0)");
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  const tex = finish(c, 4, false);
   return tex;
 }
 

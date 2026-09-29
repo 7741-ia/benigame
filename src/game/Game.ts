@@ -57,6 +57,8 @@ interface Callbacks {
   onVictory: (score: number, money: number) => void;
   onArrived?: (label: string) => void;
   onNpcGreet?: (message: string) => void;
+  onCookMeal?: (mealName: string) => void;
+  onEatMeal?: (mealName: string) => void;
 }
 
 /** voiture qui roule sur la grille */
@@ -198,6 +200,10 @@ export class Game {
   private crashCooldown = 0;
   private hazardCooldown = 0;
   private upgrades: Upgrades = { engine: 0, handling: 0, boost: 0, tires: 0 };
+  private driftVelX = 0;
+  private driftVelZ = 0;
+  private lastSkidSfxTime = 0;
+  private lastSprayTime = 0;
   private packageMesh!: THREE.Object3D;
   private hudAccum = 0;
   /** mobile : moins d'effets pour tenir les 60 fps */
@@ -1807,6 +1813,36 @@ export class Game {
     this.emitHud();
   }
 
+  visitHome3D() {
+    if (this.phase === "menu" || this.phase === "paused" || this.phase === "levelup" || this.phase === "delivered") {
+      this.phase = "playing";
+      this.freeRoam = true;
+    }
+    this.mountT = 0;
+    this.playerMode = "walk";
+    this.walker.visible = true;
+    if (this.bikeRider) this.bikeRider.visible = false;
+    this.walkerPackage.visible = false;
+    this.packageMesh.visible = false;
+    this.speed = 0;
+    this.cruiseOn = false;
+    const hx = houseManager.hx || -104;
+    const hz = houseManager.hz || 156;
+    // Positionne le joueur à pied dans la cour pavée, face au porche et à la porte d'entrée
+    this.pos.set(hx, hz + 6.2);
+    this.walkerHeading = Math.PI; // orienté vers le nord, face à la porte
+    this.walker.position.set(this.pos.x, 0, this.pos.y);
+    this.camera.position.set(hx, 2.3, hz + 9.5);
+    this.camLook.set(hx, 1.4, hz + 4.5);
+    this.camera.lookAt(this.camLook);
+    this.snapCam = true;
+    if (!houseManager.state.frontDoorOpen) {
+      houseManager.toggleFrontDoor();
+    }
+    houseManager.setPlayerPos(this.pos.x, this.pos.y);
+    this.emitHud();
+  }
+
   tvTogglePower() {
     houseManager.tv.togglePower();
     this.emitHud();
@@ -1904,6 +1940,16 @@ export class Game {
 
   private buildPois() {
     for (const poi of POIS) {
+      if (poi.type === "home") {
+        // La vraie maison 3D est déjà construite en dur dans le quartier Masiani à (hx, hz)
+        const hx = houseManager.hx || -104;
+        const hz = houseManager.hz || 156;
+        const homeMarker = new THREE.Group();
+        homeMarker.position.set(hx, 0, hz + 10.5);
+        this.scene.add(homeMarker);
+        this.poiMeshes.push({ poi, mesh: homeMarker });
+        continue;
+      }
       const [wx, wz] = landmarkWorld(poi);
       const pos = this.snapToRoad(wx, wz);
       // sur le trottoir du côté du lieu, devanture tournée vers la route
@@ -1992,9 +2038,10 @@ export class Game {
         houseManager.toggleFridge();
         this.hunger = Math.max(0, this.hunger - 15);
       } else if (act === "stove") {
-        houseManager.cookMeal("Makemba");
+        const recipe = houseManager.cookMeal("Makemba");
         this.hunger = 0;
         this.fatigue = Math.max(0, this.fatigue - 10);
+        if (recipe) this.cb.onCookMeal?.(recipe.name);
       } else if (act === "sink") {
         houseManager.toggleTap();
       } else if (act === "dining") {
@@ -2002,6 +2049,7 @@ export class Game {
         if (meal) {
           this.hunger = 0;
           this.fatigue = Math.max(0, this.fatigue - 20);
+          this.cb.onEatMeal?.(meal);
         } else {
           houseManager.toggleSit("table");
         }
@@ -2071,6 +2119,13 @@ export class Game {
       this.eatAtRestaurant();
     } else if (poi.type === "kiosk") {
       this.useKiosk();
+    } else if (poi.type === "home") {
+      this.visitHome3D();
+      this.cb.onPoiUsed?.(poi.type, poi.name);
+      this.nearPoi = null;
+      this.poiCooldown = 3;
+      this.emitHud();
+      return "home";
     } else {
       // Life activities are handled by React panels while the 3D world is paused.
       this.phase = "paused";
@@ -2246,7 +2301,9 @@ export class Game {
   };
 
   private getMaxSpeed() {
-    return (this.vehicle?.maxSpeed ?? 42) + this.upgrades.engine * 8;
+    const base = (this.vehicle?.maxSpeed ?? 42) + this.upgrades.engine * 8;
+    const weatherFactor = this.env ? this.env.weatherSpeedFactor() : 1;
+    return base * weatherFactor;
   }
 
   /** cycle jour/nuit, météo, éclairage urbain et matériaux mouillés */
@@ -2387,12 +2444,20 @@ export class Game {
 
     const maxSpeed = this.getMaxSpeed();
     const hungerPenalty = 1 - Math.max(0, this.hunger - 70) * 0.004;
+    const weatherAccel = this.env ? this.env.weatherAccelFactor() : 1;
     const accelPower =
       ((this.vehicle?.accel ?? 55) + this.upgrades.engine * 10) *
       (1 - this.fatigue * 0.002) *
-      hungerPenalty;
+      hungerPenalty *
+      weatherAccel;
     const turnRate = ((this.vehicle?.turn ?? 2.6) + this.upgrades.handling * 0.4) * (1 - this.fatigue * 0.003);
-    const grip = 1 + this.upgrades.tires * 0.08;
+
+    // Adhérence au sol : impactée par la pluie, les nuages denses et compensée par les pneus améliorés
+    const tireBonus = this.upgrades.tires * 0.08;
+    const tireProtection = this.upgrades.tires * 0.06;
+    const rawSurfaceGrip = this.env ? this.env.gripFactor() : 1;
+    const surfaceGrip = Math.min(1.0, rawSurfaceGrip + tireProtection);
+    const grip = (1 + tireBonus) * surfaceGrip;
 
     // gather input
     let throttle = 0;
@@ -2426,7 +2491,6 @@ export class Game {
     steer = Math.max(-1, Math.min(1, steer));
     const braking = this.touchBrake || this.keys[" "];
     const heavy = this.vehicle.bodyType === "van" || this.vehicle.bodyType === "tuktuk";
-    const surfaceGrip = this.env.gripFactor(); // 1 sec, ~0.7 sous la pluie
     const speedCap = maxSpeed * (this.nitroActive ? 1.7 : 1);
 
     // ── régulateur de vitesse : maintient la cible sans à-coups ──
@@ -2457,17 +2521,43 @@ export class Game {
     if (braking) {
       const decel = (heavy ? 13 : 19) * surfaceGrip;
       this.speed -= Math.sign(this.speed) * Math.min(Math.abs(this.speed), decel * dt);
+      if (Math.abs(this.speed) > 6 && surfaceGrip < 0.85) {
+        const now = performance.now();
+        if (now - this.lastSkidSfxTime > 400) {
+          audio.brakeScreech(Math.min(0.8, 0.4 + (1 - surfaceGrip) * 0.5));
+          this.lastSkidSfxTime = now;
+        }
+      }
     }
     // traînée aérodynamique : convergence naturelle vers la vitesse de pointe
     this.speed -= this.speed * Math.abs(this.speed) * 0.0009 * dt;
     this.speed = Math.max(-maxSpeed * 0.3, Math.min(speedCap, this.speed));
     if (Math.abs(this.speed) < 0.05) this.speed = 0;
 
-    // ── direction : précise à basse vitesse, stable à haute vitesse ──
-    const speedFactor = Math.min(1, (Math.abs(this.speed) / 4) * grip);
+    // ── direction & adhérence : décrochage et dérive sur sol humide/mouillé ──
+    const speedFactor = Math.min(1, (Math.abs(this.speed) / 4) * Math.max(0.6, grip));
     const stability = 1 / (1 + Math.abs(this.speed) / (heavy ? 22 : 30));
     const dirSign = this.speed >= 0 ? 1 : -1;
-    this.heading -= steer * turnRate * speedFactor * (0.55 + 0.45 * stability) * (0.7 + 0.3 * surfaceGrip) * dirSign * dt;
+    this.heading -= steer * turnRate * speedFactor * (0.55 + 0.45 * stability) * (0.65 + 0.35 * surfaceGrip) * dirSign * dt;
+
+    // Calcul de la glisse latérale (dérive physique sous pluie ou temps lourd)
+    const rx = Math.cos(this.heading);
+    const rz = -Math.sin(this.heading);
+    if (Math.abs(this.speed) > 6 && Math.abs(steer) > 0.15 && surfaceGrip < 0.96) {
+      const slipAmount = (1 - surfaceGrip) * -steer * Math.abs(this.speed) * (heavy ? 0.8 : 1.3) * dt;
+      this.driftVelX += rx * slipAmount;
+      this.driftVelZ += rz * slipAmount;
+
+      const driftMag = Math.hypot(this.driftVelX, this.driftVelZ);
+      if (driftMag > 2.2 && performance.now() - this.lastSkidSfxTime > 450) {
+        audio.brakeScreech(Math.min(0.75, driftMag * 0.12));
+        this.lastSkidSfxTime = performance.now();
+      }
+    }
+    // Frottement au sol : amortissement de la dérive (plus lent sous la pluie)
+    const driftDecay = 5.0 + surfaceGrip * 9.0;
+    this.driftVelX += (0 - this.driftVelX) * Math.min(1, dt * driftDecay);
+    this.driftVelZ += (0 - this.driftVelZ) * Math.min(1, dt * driftDecay);
 
     // ── suspensions visuelles : tangage à l'accélération/freinage, rebond amorti ──
     const accelNow = (this.speed - this.prevSpeed) / Math.max(dt, 1e-3);
@@ -2501,8 +2591,28 @@ export class Game {
         this.nitroCharge = Math.min(this.nitroMax, this.nitroCharge + dt * 8);
       }
     }
-    let nx = this.pos.x + fx * this.speed * dt;
-    let nz = this.pos.y + fz * this.speed * dt;
+
+    // Éclaboussures d'eau / projections sous les roues par temps de pluie ou sol détrempé
+    const isWetRoad = this.env && (this.env.weather === "rain" || this.env.wetness > 0.25);
+    if (isWetRoad && Math.abs(this.speed) > 4 && performance.now() - this.lastSprayTime > 65) {
+      this.lastSprayTime = performance.now();
+      const sprayCount = Math.min(8, Math.max(3, Math.floor(Math.abs(this.speed) * 0.4)));
+      const backDist = 1.3;
+      const spraySpd = Math.abs(this.speed) * 0.25 + 1.5;
+      if (heavy) {
+        // Voiture : projections d'eau des deux roues arrière
+        const rx = -fz * 0.7;
+        const rz = fx * 0.7;
+        this.burst(this.pos.x - fx * backDist + rx, 0.18, this.pos.y - fz * backDist + rz, 0xc4e2fd, sprayCount, spraySpd, 2.2, 0.3);
+        this.burst(this.pos.x - fx * backDist - rx, 0.18, this.pos.y - fz * backDist - rz, 0xc4e2fd, sprayCount, spraySpd, 2.2, 0.3);
+      } else {
+        // Moto : gerbe d'eau arrière dynamique
+        this.burst(this.pos.x - fx * backDist, 0.18, this.pos.y - fz * backDist, 0xc4e2fd, sprayCount, spraySpd, 2.4, 0.35);
+      }
+    }
+
+    let nx = this.pos.x + (fx * this.speed + this.driftVelX) * dt;
+    let nz = this.pos.y + (fz * this.speed + this.driftVelZ) * dt;
 
     // building collisions
     const r = 2.0;
@@ -2739,8 +2849,9 @@ export class Game {
     steer = Math.max(-1, Math.min(1, steer + this.touchSteer));
 
     const running = (this.keys["shift"] || this.touchBrake || this.runToggled) && move > 0;
-    // Déplacements physiques réalistes : marche naturelle et course rapide
-    const targetSpeed = move * (running ? DEFAULT_MOVEMENT.runSpeed : DEFAULT_MOVEMENT.walkSpeed) * (1 - this.fatigue * 0.003);
+    // Déplacements physiques réalistes : marche naturelle et course rapide (légèrement ralentie par sol boueux/mouillé sous la pluie)
+    const weatherWalkFactor = this.env ? (this.env.weather === "rain" ? 0.82 : this.env.weather === "cloudy" ? 0.93 : 1) : 1;
+    const targetSpeed = move * (running ? DEFAULT_MOVEMENT.runSpeed : DEFAULT_MOVEMENT.walkSpeed) * (1 - this.fatigue * 0.003) * weatherWalkFactor;
     const accelRate = (move !== 0) ? DEFAULT_MOVEMENT.acceleration : DEFAULT_MOVEMENT.deceleration;
     this.walkVel += (targetSpeed - this.walkVel) * Math.min(1, dt * accelRate);
     this.walkerHeading -= steer * (running ? DEFAULT_MOVEMENT.turnSpeedRun : DEFAULT_MOVEMENT.turnSpeedWalk) * dt;
@@ -2805,6 +2916,10 @@ export class Game {
         this.stepTimer = running ? 0.30 : 0.48;
         const isDirt = Math.abs(nx) > 175 || Math.abs(nz) > 175;
         audio.step(isDirt ? "dirt" : "asphalt", running);
+        // Éclaboussures sous les pas sur sol mouillé / sous la pluie
+        if (this.env && (this.env.weather === "rain" || this.env.wetness > 0.3)) {
+          this.burst(nx, 0.08, nz, 0xc4e2fd, running ? 5 : 2, 1.2, 1.4, 0.2);
+        }
       }
     }
 
@@ -2813,6 +2928,7 @@ export class Game {
 
     // Détection intelligente de l'objet interactif le plus proche (maison, portes, etc.)
     this.nearbyInteraction = houseManager.getClosestInteraction(nx, nz);
+    houseManager.setPlayerPos(nx, nz);
 
     // Gestion de la posture assise (canapé, table)
     if (houseManager.state.isSitting) {
@@ -2950,15 +3066,27 @@ export class Game {
     const rz = -Math.sin(this.walkerHeading);
     let cx = px - fx * dist + rx * side;
     let cz = pz - fz * dist + rz * side;
-    // anti-obstruction : si la caméra tombe dans un mur ou sous un auvent/parasol, se rapprocher
-    for (let k = 0; k < 8 && this.cameraBlocked(cx, height, cz); k++) {
-      const f = 1 - (k + 1) / 8;
-      cx = px - fx * dist * f + rx * side * f;
-      cz = pz - fz * dist * f + rz * side * f;
-      height = Math.max(2.0, height - 0.15);
+
+    // Cadrage intérieur optimisé dans la vraie maison 3D
+    if (houseManager.isInside) {
+      dist = Math.min(dist, 2.6);
+      height = Math.min(height, 2.2);
+      side = 0.35;
+      const hx = houseManager.hx;
+      const hz = houseManager.hz;
+      cx = Math.max(hx - 5.8, Math.min(hx + 5.8, px - fx * dist + rx * side));
+      cz = Math.max(hz - 4.3, Math.min(hz + 4.3, pz - fz * dist + rz * side));
+    } else {
+      // anti-obstruction : si la caméra tombe dans un mur ou sous un auvent/parasol, se rapprocher
+      for (let k = 0; k < 8 && this.cameraBlocked(cx, height, cz); k++) {
+        const f = 1 - (k + 1) / 8;
+        cx = px - fx * dist * f + rx * side * f;
+        cz = pz - fz * dist * f + rz * side * f;
+        height = Math.max(2.0, height - 0.15);
+      }
+      // dernier recours : passer au-dessus de l'obstacle plutôt que de rester dedans
+      if (this.cameraBlocked(cx, height, cz)) height = 3.6;
     }
-    // dernier recours : passer au-dessus de l'obstacle plutôt que de rester dedans
-    if (this.cameraBlocked(cx, height, cz)) height = 3.6;
     const desired = new THREE.Vector3(cx, height, cz);
     this.camera.position.lerp(desired, this.snapCam ? 1 : Math.min(1, dt * 6));
     const look = new THREE.Vector3(px + fx * 3.5 + rx * side * 0.5, 1.3, pz + fz * 3.5 + rz * side * 0.5);
@@ -3051,6 +3179,10 @@ export class Game {
   }
   debugSetWeather(w: Weather) {
     this.env.setWeather(w, true);
+  }
+  setWeather(w: Weather) {
+    this.env.setWeather(w, true);
+    this.emitHud();
   }
   /** instantané de l'état interne (tests automatisés uniquement) */
   debugState() {

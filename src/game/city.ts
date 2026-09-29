@@ -48,8 +48,12 @@ type Face = 0 | 1 | 2 | 3; // 0:+x 1:+z 2:-x 3:-z
 type District =
   | "market"
   | "commercial"
+  | "center"
+  | "popular"
   | "mixed"
   | "residential"
+  | "peripheral"
+  | "industrial"
   | "park"
   | "stadium"
   | "church"
@@ -195,15 +199,17 @@ export function buildCity(scene: THREE.Scene, _quality: Quality): CityResult {
   });
 
   // ── Vaste sol extérieur (terre battue rouge latéritique de Beni) ──
-  add(dirtMat, plane(WORLD + 300, WORLD + 300, 0, -0.03, 0, 16));
+  add(dirtMat, plane(WORLD + 600, WORLD + 600, 0, -0.03, 0, 16));
 
   // ── Réseau routier hiérarchisé ──
-  // Axes principaux asphaltés (Boulevard Nyamwisi, Route Nationale) vs axes secondaires et pistes
+  // Axes principaux asphaltés (Boulevard Nyamwisi, Route Nationale 2) vs axes secondaires et pistes
   for (let i = 0; i < GRID_LINES; i++) {
     const c = lineCoord(i);
-    // Boulevards centraux (indices 4, 5) plus soignés
-    const isMainBoulevard = i === 4 || i === 5;
-    const roadSurface = isMainBoulevard ? asphaltMat : (i % 2 === 0 ? asphaltMat : dirtMat);
+    // Boulevards centraux asphaltés (indices 7, 8) et grandes avenues (4, 11)
+    const isMainBoulevard = i === 7 || i === 8;
+    const isSecondaryAvenue = i === 4 || i === 11;
+    const isAsphalt = isMainBoulevard || isSecondaryAvenue || i % 2 === 0;
+    const roadSurface = isAsphalt ? asphaltMat : dirtMat;
 
     add(roadSurface, plane(WORLD + ROAD, ROAD, 0, 0.01, c, 12));
     for (let j = -1; j < GRID_LINES; j++) {
@@ -214,8 +220,13 @@ export function buildCity(scene: THREE.Scene, _quality: Quality): CityResult {
     }
   }
 
-  // Marquages routiers sur les boulevards asphaltés
+  // Marquages routiers sur les boulevards et avenues asphaltés
   for (let i = 0; i < GRID_LINES; i++) {
+    const isMainBoulevard = i === 7 || i === 8;
+    const isSecondaryAvenue = i === 4 || i === 11;
+    const isAsphalt = isMainBoulevard || isSecondaryAvenue || i % 2 === 0;
+    if (!isAsphalt) continue;
+
     const c = lineCoord(i);
     for (let d = -HALF + 6; d <= HALF - 6; d += 8) {
       const m = (d + HALF) % CELL;
@@ -438,53 +449,91 @@ export function buildCity(scene: THREE.Scene, _quality: Quality): CityResult {
   //  BÂTIMENTS VISITABLES AVEC INTÉRIEURS 3D COMPLETS
   // ─────────────────────────────────────────────────────────────
 
-  // 1. MAISON DU JOUEUR (Quartier Masiani) — Salon, Cuisine, Salle à Manger, Chambre, Salle de bain
+  // 1. MAISON DU JOUEUR (Quartier Masiani) — Salon, Cuisine, Salle à Manger, Chambre, Salle de bain & Cour
   const buildPlayerHouse = (hx: number, hz: number) => {
     const hw = 13.0;
     const hd = 10.0;
     const wallH = 3.2;
-    const wallThick = 0.24;
+    const wallThick = 0.28;
     const floorY = 0.2;
 
     // Initialisation du manager d'interactions maison
     houseManager.initHouseCoordinates(hx, hz);
 
-    // Sol carrelé intérieur propre
+    // ── SOL CARRELÉ INTÉRIEUR ──
     add(floorTileMat, box(hw, 0.2, hd, hx, floorY, hz, 3));
 
-    // Murs extérieurs avec porte d'entrée ouverte en façade Sud (z + hd/2)
+    // ── MURS EXTÉRIEURS AVEC ÉPAISSEUR RÉELLE & FENÊTRES ──
     const doorW = 1.25;
     const frontHalf = (hw - doorW) / 2;
+    // Façade Sud (côté entrée) avec soubassement foncé et enduit ocre sable
     add(wallMat, tint(box(frontHalf, wallH, wallThick, hx - doorW / 2 - frontHalf / 2, wallH / 2 + floorY, hz + hd / 2, 2), 0xebdaa8));
     add(wallMat, tint(box(frontHalf, wallH, wallThick, hx + doorW / 2 + frontHalf / 2, wallH / 2 + floorY, hz + hd / 2, 2), 0xebdaa8));
+    // Soubassement de protection anti-pluie
+    add(wallMat, tint(box(hw + 0.1, 0.45, wallThick + 0.04, hx, 0.45 / 2 + floorY, hz + hd / 2, 1), 0x4a3b32));
     // Linteau au-dessus de la porte
     add(wallMat, tint(box(doorW, wallH - 2.2, wallThick, hx, 2.2 + (wallH - 2.2) / 2 + floorY, hz + hd / 2, 1), 0xebdaa8));
 
-    // Porte d'entrée interactive pivotante
+    // Fenêtre Sud du salon avec cadre bois et vitre
+    add(woodMat, box(1.4, 1.2, 0.08, hx - 3.8, floorY + 1.6, hz + hd / 2, 1));
+    add(glassMat, box(1.2, 1.0, 0.03, hx - 3.8, floorY + 1.6, hz + hd / 2, 1));
+    // Rideau wax intérieur
+    add(paintMat, tint(box(0.25, 1.1, 0.04, hx - 4.45, floorY + 1.6, hz + hd / 2 - 0.1, 1), 0xd97706));
+    add(paintMat, tint(box(0.25, 1.1, 0.04, hx - 3.15, floorY + 1.6, hz + hd / 2 - 0.1, 1), 0xd97706));
+
+    // Porte d'entrée interactive en bois massif avec poignée
     const frontHinge = new THREE.Group();
     frontHinge.position.set(hx - doorW / 2 + 0.05, floorY + 0.1, hz + hd / 2);
     const frontDoorMesh = new THREE.Mesh(new THREE.BoxGeometry(doorW - 0.05, 2.15, 0.06), woodMat);
     frontDoorMesh.position.set((doorW - 0.05) / 2, 2.15 / 2, 0);
     frontDoorMesh.castShadow = true;
     frontHinge.add(frontDoorMesh);
+    // Poignée métallique
+    const doorHandle = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.14, 0.08), steelMat);
+    doorHandle.position.set((doorW - 0.05) * 0.85, 1.05, 0.04);
+    frontHinge.add(doorHandle);
     scene.add(frontHinge);
     houseManager.frontDoorGroup = frontHinge;
 
-    // Mur arrière Nord plein
+    // Auvent protecteur au-dessus du porche d'entrée
+    add(roofRust, box(doorW + 0.8, 0.06, 1.2, hx, floorY + 2.45, hz + hd / 2 + 0.6, 1));
+    // Deux poteaux en bois pour l'auvent
+    for (const sx of [-1, 1]) {
+      add(woodMat, box(0.12, 2.4, 0.12, hx + sx * (doorW / 2 + 0.35), floorY + 1.2, hz + hd / 2 + 1.15, 1));
+    }
+    // Lanterne extérieure au-dessus de la porte
+    add(metalMat, tint(box(0.18, 0.25, 0.15, hx + doorW / 2 + 0.25, floorY + 2.0, hz + hd / 2 + 0.1, 1), 0x0f172a));
+
+    // Mur arrière Nord plein avec fenêtre chambre et salle de bain
     add(wallMat, tint(box(hw, wallH, wallThick, hx, wallH / 2 + floorY, hz - hd / 2, 3), 0xebdaa8));
-    // Mur Est
+    add(wallMat, tint(box(hw + 0.1, 0.45, wallThick + 0.04, hx, 0.45 / 2 + floorY, hz - hd / 2, 1), 0x4a3b32));
+    // Fenêtre chambre Nord
+    add(woodMat, box(1.3, 1.1, 0.08, hx - 3.8, floorY + 1.6, hz - hd / 2, 1));
+    add(glassMat, box(1.1, 0.9, 0.03, hx - 3.8, floorY + 1.6, hz - hd / 2, 1));
+    // Fenêtre salle de bain Nord (verre dépoli)
+    add(woodMat, box(0.75, 0.65, 0.08, hx + 3.8, floorY + 2.0, hz - hd / 2, 1));
+    add(glassMat, box(0.65, 0.55, 0.03, hx + 3.8, floorY + 2.0, hz - hd / 2, 1));
+
+    // Mur Est avec fenêtre de cuisine
     add(wallMat, tint(box(wallThick, wallH, hd, hx + hw / 2, wallH / 2 + floorY, hz, 3), 0xebdaa8));
-    // Mur Ouest
+    add(wallMat, tint(box(wallThick + 0.04, 0.45, hd + 0.1, hx + hw / 2, 0.45 / 2 + floorY, hz, 1), 0x4a3b32));
+    add(woodMat, box(0.08, 1.1, 1.4, hx + hw / 2, floorY + 1.6, hz + 2.5, 1));
+    add(glassMat, box(0.03, 0.9, 1.2, hx + hw / 2, floorY + 1.6, hz + 2.5, 1));
+
+    // Mur Ouest avec fenêtre de salon
     add(wallMat, tint(box(wallThick, wallH, hd, hx - hw / 2, wallH / 2 + floorY, hz, 3), 0xebdaa8));
+    add(wallMat, tint(box(wallThick + 0.04, 0.45, hd + 0.1, hx - hw / 2, 0.45 / 2 + floorY, hz, 1), 0x4a3b32));
+    add(woodMat, box(0.08, 1.1, 1.4, hx - hw / 2, floorY + 1.6, hz + 2.5, 1));
+    add(glassMat, box(0.03, 0.9, 1.2, hx - hw / 2, floorY + 1.6, hz + 2.5, 1));
 
-    // Cloisons intérieures :
+    // ── CLOISONS INTÉRIEURES RÉALISTES ──
     // Cloison Est-Ouest séparant jour (Sud) et nuit (Nord) avec passages de porte
-    add(wallMat, tint(box(hw * 0.42, wallH, wallThick, hx - hw * 0.28, wallH / 2 + floorY, hz, 2), 0xf1ede6));
-    add(wallMat, tint(box(hw * 0.42, wallH, wallThick, hx + hw * 0.28, wallH / 2 + floorY, hz, 2), 0xf1ede6));
+    add(wallMat, tint(box(hw * 0.42, wallH, wallThick, hx - hw * 0.28, wallH / 2 + floorY, hz, 2), 0xf6f3ed));
+    add(wallMat, tint(box(hw * 0.42, wallH, wallThick, hx + hw * 0.28, wallH / 2 + floorY, hz, 2), 0xf6f3ed));
     // Cloison Nord-Sud séparant Chambre et Salle de bain
-    add(wallMat, tint(box(wallThick, wallH, hd * 0.45, hx, wallH / 2 + floorY, hz - hd * 0.26, 2), 0xf1ede6));
+    add(wallMat, tint(box(wallThick, wallH, hd * 0.45, hx, wallH / 2 + floorY, hz - hd * 0.26, 2), 0xf6f3ed));
 
-    // Portes intérieures pivotantes (Chambre & Salle de bain)
+    // Portes intérieures pivotantes en bois
     const bedHinge = new THREE.Group();
     bedHinge.position.set(hx - 0.65, floorY + 0.1, hz);
     const bedDoorMesh = new THREE.Mesh(new THREE.BoxGeometry(0.85, 2.1, 0.05), woodMat);
@@ -501,45 +550,110 @@ export function buildCity(scene: THREE.Scene, _quality: Quality): CityResult {
     scene.add(bathHinge);
     houseManager.bathroomDoorGroup = bathHinge;
 
-    // Toiture en tôle ondulée
-    gableRoof(hx, hz, hw + 0.8, hd + 0.8, wallH + floorY, 0xebdaa8, { rusty: true });
+    // ── TOITURE EN TÔLE ONDULÉE AVEC GROUPE DYNAMIQUE VISIBLE / CACHÉ ──
+    const houseRoofGroup = new THREE.Group();
+    const span = hd;
+    const len = hw;
+    const pitch = 0.42;
+    const rH = (span / 2) * pitch;
+    const over = 0.65;
+    const slopeLen = Math.hypot(span / 2 + over, rH);
+    const ang = Math.atan2(rH, span / 2);
+    for (const side of [-1, 1]) {
+      const rGeo = new THREE.BoxGeometry(len + over * 2, 0.08, slopeLen);
+      const rMesh = new THREE.Mesh(rGeo, roofRust);
+      rMesh.rotation.x = side * ang;
+      rMesh.position.set(hx, wallH + floorY + rH / 2 + 0.1, hz + (side * span) / 4);
+      rMesh.castShadow = true;
+      rMesh.receiveShadow = true;
+      houseRoofGroup.add(rMesh);
+    }
+    // Pignons triangulaires en tôle peinte
+    const gableGeo = new THREE.ConeGeometry(span / 2, rH, 4);
+    const gableMesh = new THREE.Mesh(gableGeo, wallMat);
+    gableMesh.scale.set(0.1, 1, 1);
+    gableMesh.rotation.y = Math.PI / 4;
+    gableMesh.position.set(hx + len / 2, wallH + floorY + rH / 2, hz);
+    houseRoofGroup.add(gableMesh);
+    scene.add(houseRoofGroup);
+    houseManager.roofGroup = houseRoofGroup;
 
-    // ── MEUBLES DU SALON (Sud-Ouest) ──
-    // Canapé confortable 3 places
-    const sofaHex = 0x2563eb;
-    add(paintMat, tint(box(2.4, 0.45, 0.95, hx - 3.8, floorY + 0.25, hz + 2.8, 1), sofaHex));
-    add(paintMat, tint(box(2.4, 0.55, 0.22, hx - 3.8, floorY + 0.65, hz + 3.25, 1), sofaHex));
-    // Table basse en bois
-    add(woodMat, box(1.4, 0.4, 0.75, hx - 3.8, floorY + 0.2, hz + 1.4, 1));
-    // Tapis de salon
-    add(paintMat, tint(box(2.6, 0.02, 1.8, hx - 3.8, floorY + 0.02, hz + 2.1, 1), 0x7c2d12));
+    // ── SALON (Sud-Ouest) : HABITÉ & CHALEUREUX ──
+    // Grand canapé 3 places royal blue
+    const sofaHex = 0x1d4ed8;
+    add(paintMat, tint(box(2.5, 0.45, 0.95, hx - 3.8, floorY + 0.25, hz + 2.8, 1), sofaHex));
+    add(paintMat, tint(box(2.5, 0.55, 0.24, hx - 3.8, floorY + 0.65, hz + 3.25, 1), sofaHex));
+    // Coussins décoratifs colorés (wax jaune & vert émeraude)
+    add(paintMat, tint(box(0.42, 0.38, 0.14, hx - 4.6, floorY + 0.58, hz + 3.05, 1), 0xf59e0b));
+    add(paintMat, tint(box(0.42, 0.38, 0.14, hx - 3.8, floorY + 0.58, hz + 3.05, 1), 0x10b981));
+    add(paintMat, tint(box(0.42, 0.38, 0.14, hx - 3.0, floorY + 0.58, hz + 3.05, 1), 0xef4444));
+    // 2 Fauteuils individuels
+    for (const [fx, frot] of [[hx - 2.1, -0.3], [hx - 5.5, 0.3]]) {
+      add(paintMat, tint(box(0.9, 0.45, 0.85, fx, floorY + 0.25, hz + 1.8, 1, frot), 0x1e40af));
+      add(paintMat, tint(box(0.9, 0.55, 0.18, fx, floorY + 0.65, hz + 2.15, 1, frot), 0x1e40af));
+    }
+    // Table basse en bois avec accessoires
+    add(woodMat, box(1.5, 0.4, 0.8, hx - 3.8, floorY + 0.2, hz + 1.5, 1));
+    // Livre et télécommande sur la table basse
+    add(paintMat, tint(box(0.3, 0.04, 0.22, hx - 3.9, floorY + 0.42, hz + 1.45, 1), 0x0284c7));
+    add(metalMat, tint(box(0.08, 0.02, 0.2, hx - 3.4, floorY + 0.42, hz + 1.5, 1), 0x0f172a));
+    // Tapis de salon à motifs géométriques
+    add(paintMat, tint(box(3.2, 0.02, 2.4, hx - 3.8, floorY + 0.02, hz + 2.2, 1), 0x9a3412));
 
-    // Meuble TV et Télévision interactive 3D
-    add(woodMat, box(2.0, 0.55, 0.5, hx - 5.5, floorY + 0.3, hz + 1.4, 1, Math.PI / 2));
-    // Cadre TV
-    add(metalMat, tint(box(1.3, 0.8, 0.08, hx - 5.5, floorY + 0.95, hz + 1.4, 1, Math.PI / 2), 0x0f172a));
-
+    // Meuble TV en bois avec étagères
+    add(woodMat, box(2.2, 0.58, 0.52, hx - 5.5, floorY + 0.3, hz + 1.4, 1, Math.PI / 2));
+    // Cadre TV moderne
+    add(metalMat, tint(box(1.35, 0.85, 0.08, hx - 5.5, floorY + 1.0, hz + 1.4, 1, Math.PI / 2), 0x020617));
     // Écran TV dynamique animé (CanvasTexture)
-    const tvScreenGeo = new THREE.PlaneGeometry(1.22, 0.72);
-    const tvScreenMat = new THREE.MeshBasicMaterial({
-      map: houseManager.tv.texture,
-      toneMapped: false,
-    });
+    const tvScreenGeo = new THREE.PlaneGeometry(1.24, 0.74);
+    const tvScreenMat = new THREE.MeshBasicMaterial({ map: houseManager.tv.texture, toneMapped: false });
     const tvScreenMesh = new THREE.Mesh(tvScreenGeo, tvScreenMat);
-    tvScreenMesh.position.set(hx - 5.45, floorY + 0.95, hz + 1.4);
+    tvScreenMesh.position.set(hx - 5.45, floorY + 1.0, hz + 1.4);
     tvScreenMesh.rotation.y = Math.PI / 2;
     scene.add(tvScreenMesh);
     houseManager.tvScreenMesh = tvScreenMesh;
 
-    // ── MEUBLES DE LA CUISINE & SALLE À MANGER (Sud-Est) ──
-    // Plan de travail et évier
-    add(roofConcrete, box(2.6, 0.85, 0.7, hx + 4.2, floorY + 0.45, hz + 1.6, 1, Math.PI / 2));
+    // Décorations murales : Tableau paysage volcanique
+    add(woodMat, box(1.2, 0.75, 0.04, hx - 3.8, floorY + 2.1, hz + hd / 2 - 0.05, 1));
+    add(paintMat, tint(box(1.1, 0.65, 0.02, hx - 3.8, floorY + 2.1, hz + hd / 2 - 0.07, 1), 0x047857));
+    // Horloge murale
+    const clockCyl = new THREE.CylinderGeometry(0.24, 0.24, 0.04, 12);
+    clockCyl.rotateX(Math.PI / 2);
+    clockCyl.translate(hx - 1.8, floorY + 2.2, hz + hd / 2 - 0.06);
+    add(paintMat, tint(clockCyl, 0xf8fafc));
+    // Plante verte d'intérieur en pot
+    const potCyl = new THREE.CylinderGeometry(0.25, 0.18, 0.45, 8);
+    potCyl.translate(hx - 5.7, floorY + 0.25, hz + 3.8);
+    add(paintMat, tint(potCyl, 0xb45309));
+    for (let l = 0; l < 4; l++) {
+      const leafGeo = new THREE.ConeGeometry(0.12, 0.5, 5);
+      leafGeo.rotateZ(0.4 * (l % 2 === 0 ? 1 : -1));
+      leafGeo.translate(hx - 5.7, floorY + 0.6, hz + 3.8);
+      add(grassMat, leafGeo);
+    }
 
-    // Robinet et filet d'eau animé
-    const tapGeo = new THREE.CylinderGeometry(0.015, 0.015, 0.25, 6);
-    tapGeo.translate(hx + 4.2, floorY + 0.95, hz + 1.6);
+    // ── ENTRÉE : DÉTAILS DE VIE DU QUOTIDIEN ──
+    // Paire de babouches/sandales près de la porte d'entrée
+    for (const [bx, bz] of [[hx - 0.4, hz + 4.3], [hx - 0.15, hz + 4.3]]) {
+      add(paintMat, tint(box(0.14, 0.04, 0.3, bx, floorY + 0.03, bz, 1), 0x475569));
+    }
+    // Interrupteur mural blanc à l'entrée
+    add(paintMat, tint(box(0.1, 0.14, 0.03, hx - 0.5, floorY + 1.25, hz + hd / 2 - 0.03, 1), 0xf8fafc));
+    // Porte-manteau mural avec casquette et veste
+    add(woodMat, box(0.8, 0.12, 0.05, hx - 1.2, floorY + 1.7, hz + hd / 2 - 0.04, 1));
+    add(paintMat, tint(box(0.35, 0.55, 0.12, hx - 1.2, floorY + 1.45, hz + hd / 2 - 0.08, 1), 0x0284c7));
+
+    // ── CUISINE RÉALISTE & FONCTIONNELLE (Sud-Est) ──
+    // Bloc de cuisine en L avec plan de travail granit
+    add(roofConcrete, box(2.6, 0.88, 0.75, hx + 4.2, floorY + 0.45, hz + 1.6, 1, Math.PI / 2));
+    add(woodMat, box(2.6, 0.82, 0.72, hx + 4.2, floorY + 0.42, hz + 1.6, 1, Math.PI / 2));
+
+    // Évier inox encastré et robinet chrome
+    add(steelMat, box(0.7, 0.1, 0.45, hx + 4.2, floorY + 0.85, hz + 1.6, 1));
+    const tapGeo = new THREE.CylinderGeometry(0.015, 0.015, 0.28, 6);
+    tapGeo.translate(hx + 4.2, floorY + 1.0, hz + 1.6);
     add(steelMat, tapGeo);
-
+    // Filet d'eau animé
     const waterGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.35, 6);
     const waterMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.8 });
     const waterMesh = new THREE.Mesh(waterGeo, waterMat);
@@ -548,91 +662,215 @@ export function buildCity(scene: THREE.Scene, _quality: Quality): CityResult {
     scene.add(waterMesh);
     houseManager.waterStreamMesh = waterMesh;
 
-    // Bouteille de gaz bleue & réchaud
-    const gasBot = new THREE.CylinderGeometry(0.2, 0.2, 0.55, 8);
-    gasBot.translate(hx + 3.4, floorY + 0.3, hz + 1.2);
+    // Cuisinière à gaz avec réchaud et bouteille bleue
+    const gasBot = new THREE.CylinderGeometry(0.22, 0.22, 0.58, 8);
+    gasBot.translate(hx + 3.4, floorY + 0.3, hz + 1.15);
     add(paintMat, tint(gasBot, 0x0284c7));
-
-    // Casserole et flamme de cuisson
-    const potGeo = new THREE.CylinderGeometry(0.16, 0.16, 0.14, 8);
-    potGeo.translate(hx + 3.4, floorY + 0.68, hz + 1.2);
+    // Réchaud à 2 feux
+    add(metalMat, tint(box(0.7, 0.12, 0.45, hx + 3.4, floorY + 0.88, hz + 1.15, 1), 0x1e293b));
+    // Four encastré sous la cuisinière avec vitre noire et poignée inox
+    add(metalMat, tint(box(0.68, 0.55, 0.45, hx + 3.4, floorY + 0.42, hz + 1.15, 1), 0x0f172a));
+    add(glassMat, tint(box(0.52, 0.35, 0.02, hx + 3.4, floorY + 0.42, hz + 1.15 + 0.23, 1), 0x000000));
+    add(steelMat, box(0.42, 0.03, 0.04, hx + 3.4, floorY + 0.62, hz + 1.15 + 0.25, 1));
+    // Casserole et poêle
+    const potGeo = new THREE.CylinderGeometry(0.16, 0.16, 0.15, 8);
+    potGeo.translate(hx + 3.25, floorY + 0.98, hz + 1.15);
     add(metalMat, potGeo);
-
-    const flameGeo = new THREE.ConeGeometry(0.08, 0.18, 6);
+    const panGeo = new THREE.CylinderGeometry(0.18, 0.18, 0.06, 8);
+    panGeo.translate(hx + 3.55, floorY + 0.93, hz + 1.15);
+    add(metalMat, panGeo);
+    // Flamme de cuisson animée
+    const flameGeo = new THREE.ConeGeometry(0.09, 0.18, 6);
     const flameMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
     const flameMesh = new THREE.Mesh(flameGeo, flameMat);
-    flameMesh.position.set(hx + 3.4, floorY + 0.62, hz + 1.2);
+    flameMesh.position.set(hx + 3.25, floorY + 0.92, hz + 1.15);
     flameMesh.visible = false;
     scene.add(flameMesh);
     houseManager.stoveFlameMesh = flameMesh;
 
-    // Réfrigérateur moderne blanc avec poignée
-    add(paintMat, tint(box(0.9, 1.8, 0.85, hx + 5.5, floorY + 0.9, hz + 3.4, 1), 0xf8fafc));
-    add(metalMat, tint(box(0.05, 0.45, 0.05, hx + 5.02, floorY + 1.05, hz + 3.2, 1), 0x94a3b8));
+    // Placards hauts suspendus au-dessus de la cuisine
+    add(woodMat, box(2.4, 0.65, 0.35, hx + 4.2, floorY + 2.2, hz + 1.6, 1, Math.PI / 2));
+    // Bouteille d'huile de palme rouge et sac de farine sur le plan de travail
+    const oilBot = new THREE.CylinderGeometry(0.04, 0.05, 0.25, 6);
+    oilBot.translate(hx + 4.2, floorY + 0.98, hz + 1.1);
+    add(paintMat, tint(oilBot, 0xd97706));
+    add(paintMat, tint(box(0.2, 0.26, 0.15, hx + 4.2, floorY + 0.98, hz + 0.8, 1), 0xfef08a));
 
-    // Table à manger et 4 chaises (Salle à Manger)
-    add(woodMat, box(1.6, 0.78, 1.2, hx + 2.4, floorY + 0.39, hz + 3.6, 1));
-    for (const [dx, dz] of [[-0.9, 0], [0.9, 0], [0, -0.7], [0, 0.7]]) {
-      add(woodMat, box(0.42, 0.45, 0.42, hx + 2.4 + dx, floorY + 0.23, hz + 3.6 + dz, 1));
-      add(woodMat, box(0.42, 0.5, 0.06, hx + 2.4 + dx, floorY + 0.65, hz + 3.6 + dz + (dz === 0 ? 0.2 : 0), 1));
+    // Réfrigérateur moderne blanc avec porte pivotante
+    add(paintMat, tint(box(0.9, 1.82, 0.85, hx + 5.5, floorY + 0.91, hz + 3.4, 1), 0xf8fafc));
+    const fridgeDoorGroup = new THREE.Group();
+    fridgeDoorGroup.position.set(hx + 5.05, floorY + 0.91, hz + 3.82);
+    const fridgeDoorMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(0.05, 1.78, 0.82),
+      new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.3 })
+    );
+    fridgeDoorMesh.position.set(0, 0, -0.41);
+    fridgeDoorGroup.add(fridgeDoorMesh);
+    const fridgeHandle = new THREE.Mesh(
+      new THREE.BoxGeometry(0.04, 0.45, 0.04),
+      new THREE.MeshStandardMaterial({ color: 0x64748b, metalness: 0.7 })
+    );
+    fridgeHandle.position.set(-0.04, 0.15, -0.75);
+    fridgeDoorGroup.add(fridgeHandle);
+    scene.add(fridgeDoorGroup);
+    houseManager.fridgeDoorGroup = fridgeDoorGroup;
+
+    // Étagère à épices murale & corbeille de bananes/makemba
+    add(woodMat, box(1.2, 0.06, 0.22, hx + 4.2, floorY + 1.7, hz + 1.6, 1, Math.PI / 2));
+    const basketGeo = new THREE.CylinderGeometry(0.24, 0.16, 0.14, 8);
+    basketGeo.translate(hx + 4.2, floorY + 0.96, hz + 2.2);
+    add(woodMat, basketGeo);
+    // Bananes plantains
+    for (let b = 0; b < 3; b++) {
+      const bGeo = new THREE.CylinderGeometry(0.03, 0.03, 0.24, 5);
+      bGeo.rotateZ(0.6 + b * 0.2);
+      bGeo.translate(hx + 4.2, floorY + 1.05, hz + 2.2 + (b - 1) * 0.08);
+      add(paintMat, tint(bGeo, 0xeab308));
     }
-    // Assiettes
-    add(paintMat, tint(box(0.32, 0.03, 0.32, hx + 2.0, floorY + 0.8, hz + 3.6, 1), 0xf8fafc));
-    add(paintMat, tint(box(0.32, 0.03, 0.32, hx + 2.8, floorY + 0.8, hz + 3.6, 1), 0xf8fafc));
+    // Poubelle à pédale
+    const binGeo = new THREE.CylinderGeometry(0.18, 0.18, 0.45, 8);
+    binGeo.translate(hx + 5.8, floorY + 0.25, hz + 2.2);
+    add(steelMat, binGeo);
 
-    // ── MEUBLES DE LA CHAMBRE (Nord-Ouest) ──
-    // Grand lit avec matelas, oreillers et moustiquaire
-    add(woodMat, box(2.1, 0.4, 1.7, hx - 4.2, floorY + 0.22, hz - 3.2, 1));
-    add(paintMat, tint(box(2.0, 0.2, 1.6, hx - 4.2, floorY + 0.45, hz - 3.2, 1), 0xf8fafc));
-    // Cadre moustiquaire
-    add(steelMat, box(2.1, 1.8, 0.04, hx - 4.2, floorY + 1.1, hz - 2.35, 1));
-    // Table de nuit et lampe
-    add(woodMat, box(0.55, 0.55, 0.55, hx - 2.8, floorY + 0.28, hz - 4.2, 1));
-    add(paintMat, tint(box(0.25, 0.35, 0.25, hx - 2.8, floorY + 0.68, hz - 4.2, 1), 0xfef08a));
-    // Armoire penderie
-    add(woodMat, box(1.3, 2.0, 0.6, hx - 1.2, floorY + 1.0, hz - 4.2, 1));
+    // ── SALLE À MANGER (Sud-Est) : TABLE FAMILIALE & CHAISES ──
+    add(woodMat, box(1.7, 0.78, 1.25, hx + 2.4, floorY + 0.39, hz + 3.6, 1));
+    for (const [dx, dz] of [[-0.95, 0], [0.95, 0], [0, -0.75], [0, 0.75]]) {
+      add(woodMat, box(0.42, 0.45, 0.42, hx + 2.4 + dx, floorY + 0.23, hz + 3.6 + dz, 1));
+      add(woodMat, box(0.42, 0.55, 0.06, hx + 2.4 + dx, floorY + 0.68, hz + 3.6 + dz + (dz === 0 ? 0.2 : 0), 1));
+    }
+    // Vaisselle : 4 Assiettes et verres
+    for (const [ax, az] of [[-0.5, -0.3], [0.5, -0.3], [-0.5, 0.3], [0.5, 0.3]]) {
+      add(paintMat, tint(box(0.28, 0.03, 0.28, hx + 2.4 + ax, floorY + 0.8, hz + 3.6 + az, 1), 0xf8fafc));
+      const cupCyl = new THREE.CylinderGeometry(0.04, 0.035, 0.12, 6);
+      cupCyl.translate(hx + 2.4 + ax + 0.2, floorY + 0.85, hz + 3.6 + az);
+      add(glassMat, cupCyl);
+    }
+    // Carafe d'eau en verre au centre de la table
+    const jugGeo = new THREE.CylinderGeometry(0.06, 0.1, 0.24, 8);
+    jugGeo.translate(hx + 2.4, floorY + 0.9, hz + 3.6);
+    add(glassMat, jugGeo);
 
-    // ── MEUBLES DE LA SALLE DE BAIN (Nord-Est) ──
-    // Receveur de douche carrelé
-    add(paintMat, tint(box(1.3, 0.12, 1.3, hx + 4.8, floorY + 0.08, hz - 3.8, 1), 0x0284c7));
-    // Pommeau de douche
-    const showerPipe = new THREE.CylinderGeometry(0.02, 0.02, 1.8, 6);
-    showerPipe.translate(hx + 5.3, floorY + 1.2, hz - 3.8);
+    // ── CHAMBRE (Nord-Ouest) : GRAND LIT, MOUSTIQUAIRE & ARMOIRE ──
+    // Grand tapis au pied du lit
+    add(paintMat, tint(box(2.2, 0.02, 1.3, hx - 4.2, floorY + 0.02, hz - 1.8, 1), 0x7c3aed));
+    // Cadre de lit en bois massif
+    add(woodMat, box(2.2, 0.45, 1.8, hx - 4.2, floorY + 0.23, hz - 3.2, 1));
+    // Tête de lit en bois sculpté
+    add(woodMat, box(2.2, 1.1, 0.08, hx - 4.2, floorY + 0.75, hz - 4.15, 1));
+    // Matelas confortable avec couverture wax colorée
+    add(paintMat, tint(box(2.05, 0.22, 1.65, hx - 4.2, floorY + 0.48, hz - 3.2, 1), 0xb45309));
+    // Deux oreillers blancs
+    add(paintMat, tint(box(0.7, 0.12, 0.45, hx - 4.8, floorY + 0.62, hz - 3.8, 1), 0xf8fafc));
+    add(paintMat, tint(box(0.7, 0.12, 0.45, hx - 3.6, floorY + 0.62, hz - 3.8, 1), 0xf8fafc));
+    // Cadre à 4 montants pour moustiquaire
+    for (const [cx, cz] of [[-1.05, -0.85], [1.05, -0.85], [-1.05, 0.85], [1.05, 0.85]]) {
+      add(steelMat, box(0.04, 2.3, 0.04, hx - 4.2 + cx, floorY + 1.15, hz - 3.2 + cz, 1));
+    }
+    // Barres transversales de moustiquaire
+    add(steelMat, box(2.14, 0.03, 1.74, hx - 4.2, floorY + 2.3, hz - 3.2, 1));
+    // Table de nuit et lampe de chevet
+    add(woodMat, box(0.55, 0.55, 0.55, hx - 2.8, floorY + 0.28, hz - 4.1, 1));
+    const lampBase = new THREE.CylinderGeometry(0.1, 0.14, 0.25, 8);
+    lampBase.translate(hx - 2.8, floorY + 0.68, hz - 4.1);
+    add(woodMat, lampBase);
+    const lampShade = new THREE.ConeGeometry(0.18, 0.2, 8);
+    lampShade.translate(hx - 2.8, floorY + 0.85, hz - 4.1);
+    add(paintMat, tint(lampShade, 0xfef08a));
+    // Grande armoire à double porte pour les vêtements
+    add(woodMat, box(1.4, 2.1, 0.65, hx - 1.2, floorY + 1.05, hz - 4.1, 1));
+    for (const sx of [-0.2, 0.2]) {
+      add(metalMat, tint(box(0.03, 0.2, 0.03, hx - 1.2 + sx, floorY + 1.1, hz - 3.75, 1), 0x94a3b8));
+    }
+
+    // ── SALLE DE BAIN (Nord-Est) : DOUCHE ITALIENNE, LAVABO & WC ──
+    // Receveur de douche antidérapant
+    add(paintMat, tint(box(1.4, 0.12, 1.4, hx + 4.8, floorY + 0.08, hz - 3.8, 1), 0x0284c7));
+    // Cloison vitrée de douche
+    add(glassMat, box(0.05, 2.1, 1.2, hx + 4.1, floorY + 1.05, hz - 3.8, 1));
+    // Colonne de douche et pommeau chrome
+    const showerPipe = new THREE.CylinderGeometry(0.02, 0.02, 1.9, 6);
+    showerPipe.translate(hx + 5.3, floorY + 1.25, hz - 3.8);
     add(steelMat, showerPipe);
-
-    // Jet d'eau de douche animé
-    const sprayGeo = new THREE.ConeGeometry(0.25, 0.7, 8);
-    const sprayMat = new THREE.MeshBasicMaterial({ color: 0x7dd3fc, transparent: true, opacity: 0.6 });
+    const showerHead = new THREE.CylinderGeometry(0.12, 0.12, 0.04, 8);
+    showerHead.translate(hx + 5.15, floorY + 2.15, hz - 3.8);
+    add(steelMat, showerHead);
+    // Jet d'eau animé de douche
+    const sprayGeo = new THREE.ConeGeometry(0.3, 0.85, 8);
+    const sprayMat = new THREE.MeshBasicMaterial({ color: 0x7dd3fc, transparent: true, opacity: 0.65 });
     const sprayMesh = new THREE.Mesh(sprayGeo, sprayMat);
-    sprayMesh.position.set(hx + 4.8, floorY + 1.6, hz - 3.8);
+    sprayMesh.position.set(hx + 5.15, floorY + 1.7, hz - 3.8);
     sprayMesh.rotation.x = Math.PI;
     sprayMesh.visible = false;
     scene.add(sprayMesh);
     houseManager.showerSprayMesh = sprayMesh;
 
-    // Lavabo & miroir
-    add(paintMat, tint(box(0.65, 0.75, 0.45, hx + 2.2, floorY + 0.4, hz - 4.4, 1), 0xf8fafc));
-    add(glassMat, tint(box(0.6, 0.8, 0.03, hx + 2.2, floorY + 1.3, hz - 4.48, 1), 0x93c5fd));
+    // Meuble lavabo céramique et miroir
+    add(paintMat, tint(box(0.7, 0.8, 0.5, hx + 2.2, floorY + 0.4, hz - 4.4, 1), 0xf8fafc));
+    add(woodMat, box(0.72, 0.92, 0.03, hx + 2.2, floorY + 1.35, hz - 4.5, 1));
+    add(glassMat, tint(box(0.65, 0.85, 0.04, hx + 2.2, floorY + 1.35, hz - 4.48, 1), 0x93c5fd));
+    // Tapis de bain moelleux devant la douche
+    add(paintMat, tint(box(1.0, 0.02, 0.65, hx + 3.2, floorY + 0.02, hz - 3.8, 1), 0x0284c7));
+    // Porte-serviette et serviette bleue
+    add(steelMat, box(0.6, 0.04, 0.08, hx + 1.4, floorY + 1.2, hz - 4.48, 1));
+    add(paintMat, tint(box(0.45, 0.65, 0.06, hx + 1.4, floorY + 0.95, hz - 4.45, 1), 0x0284c7));
 
     // Toilettes modernes avec réservoir
-    add(paintMat, tint(box(0.45, 0.45, 0.55, hx + 2.0, floorY + 0.23, hz - 2.2, 1), 0xf8fafc));
-    add(paintMat, tint(box(0.45, 0.45, 0.22, hx + 2.0, floorY + 0.65, hz - 2.45, 1), 0xf8fafc));
+    add(paintMat, tint(box(0.48, 0.45, 0.58, hx + 2.0, floorY + 0.23, hz - 2.2, 1), 0xf8fafc));
+    add(paintMat, tint(box(0.48, 0.48, 0.24, hx + 2.0, floorY + 0.68, hz - 2.45, 1), 0xf8fafc));
 
-    // Point Light d'ambiance pour l'éclairage de la maison
-    const ceilingLight = new THREE.PointLight(0xfff5ea, 1.4, 18);
-    ceilingLight.position.set(hx, floorY + 2.8, hz);
+    // ── ÉCLAIRAGE INTÉRIEUR AMBIANT (PLAFONNIER) ──
+    const ceilingLight = new THREE.PointLight(0xfff5ea, 1.5, 20);
+    ceilingLight.position.set(hx, floorY + 2.9, hz);
     scene.add(ceilingLight);
     houseManager.ceilingLight = ceilingLight;
 
-    // Collisions précises (murs extérieurs + cloisons laissant passer les portes)
+    // ── EXTÉRIEUR DE LA MAISON : CLÔTURE, COUR, BANANIERS & ABRI VÉHICULE ──
+    // Cour pavée en pierre naturelle menant au porche
+    add(sidewalkMat, box(2.4, 0.08, 6.0, hx, floorY - 0.05, hz + 7.5, 1));
+    // Muret d'enceinte / clôture de la parcelle
+    add(wallMat, tint(box(18.0, 1.4, 0.2, hx + 1.0, 0.7, hz + 10.5, 1), 0x64748b));
+    add(wallMat, tint(box(0.2, 1.4, 16.0, hx - 8.0, 0.7, hz + 2.5, 1), 0x64748b));
+    add(wallMat, tint(box(0.2, 1.4, 16.0, hx + 10.0, 0.7, hz + 2.5, 1), 0x64748b));
+    // Piliers de portail d'entrée
+    for (const px of [hx - 2.0, hx + 2.0]) {
+      add(wallMat, tint(box(0.6, 1.9, 0.6, px, 0.95, hz + 10.5, 1), 0x334155));
+    }
+    // Portail métallique ouvert
+    add(steelMat, box(1.8, 1.6, 0.06, hx - 2.9, 0.85, hz + 10.5, 1, 0.4));
+
+    // Abri véhicule / Carport avec toit en tôle ondulée
+    const carX = hx + 8.2;
+    const carZ = hz + 5.5;
+    for (const [cx, cz] of [[-1.8, -2.0], [1.8, -2.0], [-1.8, 2.0], [1.8, 2.0]]) {
+      add(woodMat, box(0.16, 2.8, 0.16, carX + cx, floorY + 1.4, carZ + cz, 1));
+    }
+    add(roofRust, box(4.2, 0.08, 4.6, carX, floorY + 2.85, carZ, 1, 0.08));
+    // Sol de stationnement cimenté
+    add(sidewalkMat, box(4.0, 0.12, 4.4, carX, floorY - 0.04, carZ, 1));
+
+    // Végétation : Bananiers dans la cour et bougainvillier
+    addBanana(hx - 5.5, hz + 8.5);
+    addBanana(hx - 6.2, hz + 6.8);
+    addBanana(hx - 4.8, hz + 5.5);
+    addTree(hx + 8.5, hz - 2.5, 1.15);
+
+    // ── COLLISIONS PHYSIQUES RÉALISTES ──
+    // Murs extérieurs
     colliders.push({ x: hx - doorW / 2 - frontHalf / 2, z: hz + hd / 2, hw: frontHalf / 2, hd: wallThick });
     colliders.push({ x: hx + doorW / 2 + frontHalf / 2, z: hz + hd / 2, hw: frontHalf / 2, hd: wallThick });
     colliders.push({ x: hx, z: hz - hd / 2, hw: hw / 2, hd: wallThick });
     colliders.push({ x: hx + hw / 2, z: hz, hw: wallThick, hd: hd / 2 });
     colliders.push({ x: hx - hw / 2, z: hz, hw: wallThick, hd: hd / 2 });
+    // Cloisons intérieures
     colliders.push({ x: hx - hw * 0.28, z: hz, hw: (hw * 0.42) / 2, hd: wallThick });
     colliders.push({ x: hx + hw * 0.28, z: hz, hw: (hw * 0.42) / 2, hd: wallThick });
     colliders.push({ x: hx, z: hz - hd * 0.26, hw: wallThick, hd: (hd * 0.45) / 2 });
+    // Meubles volumineux (colliders pour ne pas traverser canapé, lit, cuisine, frigo)
+    colliders.push({ x: hx - 3.8, z: hz + 2.8, hw: 1.25, hd: 0.55 });
+    colliders.push({ x: hx + 4.2, z: hz + 1.6, hw: 0.45, hd: 1.4 });
+    colliders.push({ x: hx + 5.5, z: hz + 3.4, hw: 0.5, hd: 0.5 });
+    colliders.push({ x: hx - 4.2, z: hz - 3.2, hw: 1.15, hd: 0.95 });
+    colliders.push({ x: hx + 2.4, z: hz + 3.6, hw: 0.85, hd: 0.65 });
 
     const doorX = hx;
     const doorZ = hz + hd / 2 + 1.2;
@@ -646,11 +884,11 @@ export function buildCity(scene: THREE.Scene, _quality: Quality): CityResult {
       doorZ,
       bounds: { minX: hx - hw / 2, maxX: hx + hw / 2, minZ: hz - hd / 2, maxZ: hz + hd / 2 },
       rooms: [
-        { name: "Salon", x: hx - 3.5, z: hz + 2.2, icon: "🛋️" },
-        { name: "Cuisine", x: hx + 3.5, z: hz + 2.2, icon: "🍳" },
+        { name: "Salon", x: hx - 3.8, z: hz + 2.2, icon: "🛋️" },
+        { name: "Cuisine", x: hx + 4.0, z: hz + 2.0, icon: "🍳" },
         { name: "Salle à manger", x: hx + 2.4, z: hz + 3.6, icon: "🍽️" },
-        { name: "Chambre", x: hx - 3.5, z: hz - 2.5, icon: "🛏️" },
-        { name: "Salle de bain", x: hx + 3.5, z: hz - 2.5, icon: "🚿" },
+        { name: "Chambre", x: hx - 3.8, z: hz - 2.8, icon: "🛏️" },
+        { name: "Salle de bain", x: hx + 3.8, z: hz - 2.8, icon: "🚿" },
       ],
     });
   };
@@ -833,32 +1071,57 @@ export function buildCity(scene: THREE.Scene, _quality: Quality): CityResult {
   };
 
   // ─────────────────────────────────────────────────────────────
-  //  GÉNÉRATION DES 81 BLOCS URBAINS DE BENI (9 x 9)
+  //  GÉNÉRATION DES 225 BLOCS URBAINS DE BENI (15 x 15 - 780m)
   // ─────────────────────────────────────────────────────────────
   const districtOf = (gx: number, gz: number): District => {
     const key = `${gx},${gz}`;
     const specials: Record<string, District> = {
-      "4,4": "market",     // Grand Marché Central au cœur de la ville
-      "4,3": "commercial", // Avenue du Commerce & Boutique Kivu Express
-      "3,4": "admin",      // Mairie de Beni (Hôtel de Ville)
-      "5,4": "fuel",       // Station Cobil & Commissariat
-      "5,5": "restaurant", // Chez Mama Léontine
-      "2,7": "residential",// Maison du Joueur (Masiani)
-      "2,2": "hospital",   // Hôpital Général
-      "6,3": "stadium",    // Stade du 15 Octobre
-      "5,7": "church",     // Cathédrale Saint-Gustave
-      "4,8": "campus",     // Université UCBC
-      "2,5": "school",     // Institut de Beni
-      "7,7": "airport",    // Aéroport de Mavivi
-      "1,4": "park",       // Espace vert
-      "6,1": "park",
-      "1,1": "park",
+      // 1. Centre-Ville & Places Principales
+      "7,7": "center",      // Place du Rond-Point Central (0, 0)
+      "6,7": "admin",       // Mairie de Beni (Hôtel de Ville) (-52, 0)
+      "7,6": "admin",       // Commissariat Central de Police (0, -52)
+      "8,7": "commercial",  // Boulevard Commercial Est (52, 0)
+      // 2. Grand Marché & Commerces Clés
+      "9,7": "market",      // Grand Marché Central (104, 0)
+      "8,6": "commercial",  // Avenue du Commerce & Boutique Kivu Express (52, -52)
+      "9,8": "restaurant",  // Restaurant Chez Mama Léontine (104, 52)
+      // 3. Transports, Carburant & Logistique
+      "10,5": "fuel",       // Station-Service Cobil & Total (156, -104)
+      "11,4": "industrial", // Gare Routière des Agences de Voyage (208, -156)
+      // 4. Quartier Résidentiel Masiani (Maison du Joueur)
+      "5,10": "residential",// Maison du Joueur (-104, 156)
+      // 5. Santé & Éducation (Bungulu)
+      "5,4": "hospital",    // Pharmacie & Dispensaire de l'Espoir (-104, -156)
+      "5,3": "hospital",    // Hôpital Général de Référence (-104, -208)
+      "4,4": "school",      // Institut de Beni (-156, -156)
+      "3,4": "school",      // École Primaire Bungulu (-208, -156)
+      // 6. Sport & Événements
+      "11,7": "stadium",    // Grand Stade Municipal du 15 Octobre (208, 0)
+      "11,8": "stadium",    // Terrains de Sport & Loisirs (208, 52)
+      // 7. Culte & Campus
+      "9,10": "church",     // Cathédrale Saint-Gustave (104, 156)
+      "10,11": "campus",    // Université Chrétienne Bilingue - UCBC (156, 208)
+      // 8. Espaces Verts & Parcs
+      "2,8": "park",        // Parc Botanique & Collines Vertes (-260, 52)
+      "8,2": "park",        // Réserve & Pépinière d'Eucalyptus (52, -260)
+      "1,4": "park",        // Parc de la Colline Ouest (-312, -156)
+      // 9. Périphérie
+      "13,2": "airport",    // Route et Entrée Aéroport Mavivi (286, -260)
     };
     if (specials[key]) return specials[key];
-    const ring = Math.max(Math.abs(gx - 4), Math.abs(gz - 4));
-    if (ring <= 1) return "commercial";
-    if (ring === 2) return rnd() < 0.6 ? "mixed" : "residential";
-    return "residential";
+
+    // Zonage urbain cohérent et diversifié par anneaux et quadrants
+    if (gx <= 1 || gx >= 13 || gz <= 1 || gz >= 13) return "peripheral";
+    if (gx >= 2 && gx <= 4 && gz >= 5 && gz <= 7) return "popular"; // Zone Populaire Malepe & Kalinda
+    if (gx >= 6 && gx <= 8 && gz >= 6 && gz <= 8) return "center";  // Centre-Ville
+    if (gx >= 8 && gx <= 10 && gz >= 5 && gz <= 8) return "commercial"; // Quartier Commercial
+    if (gx >= 4 && gx <= 6 && gz >= 9 && gz <= 12) return "residential"; // Quartier Masiani
+    if (gx >= 10 && gx <= 12 && gz >= 3 && gz <= 5) return "industrial"; // Zone Industrielle & Garages
+
+    const d = Math.hypot(gx - 7, gz - 7);
+    if (d <= 2.5) return "center";
+    if (d <= 4.5) return rnd() < 0.5 ? "commercial" : "mixed";
+    return rnd() < 0.5 ? "residential" : "popular";
   };
 
   const inner = CELL - ROAD; // 52 - 16 = 36 m
@@ -875,46 +1138,45 @@ export function buildCity(scene: THREE.Scene, _quality: Quality): CityResult {
       // Arbres d'alignement tropicaux (manguiers, palmiers)
       for (const sx of [-1, 1]) {
         for (const sz of [-1, 1]) {
-          if (rnd() < 0.75) addTree(cx + sx * 18.2, cz + sz * 18.2, 0.95);
+          if (rnd() < 0.7) addTree(cx + sx * 18.2, cz + sz * 18.2, 0.95);
         }
       }
 
       // ── CAS SPÉCIAUX PAR DISTRICT ──
 
-      // A. Maison du joueur (Quartier Masiani : gx 2, gz 7)
-      if (gx === 2 && gz === 7) {
+      // 1. Maison du joueur (Quartier Masiani : gx 5, gz 10 -> cx = -104, cz = 156)
+      if (gx === 5 && gz === 10) {
         buildPlayerHouse(cx, cz);
         for (let k = 0; k < 4; k++) addBanana(cx + 8, cz - 10 + k * 6);
         for (let k = 0; k < 3; k++) addTree(cx - 10, cz - 8 + k * 7, 1.1);
         continue;
       }
 
-      // B. Restaurant Chez Mama Léontine (gx 5, gz 5)
-      if (gx === 5 && gz === 5) {
+      // 2. Restaurant Chez Mama Léontine (gx 9, gz 8)
+      if (gx === 9 && gz === 8) {
         buildRestaurant(cx, cz);
         for (let k = 0; k < 3; k++) addTree(cx + 10, cz - 6 + k * 6, 1.0);
         continue;
       }
 
-      // C. Boutique Kivu Express (gx 4, gz 3)
-      if (gx === 4 && gz === 3) {
+      // 3. Boutique Kivu Express (gx 8, gz 6)
+      if (gx === 8 && gz === 6) {
         buildShop(cx - 4, cz);
-        // Autre petite quincaillerie voisine
         building({
           x: cx + 9, z: cz, w: 8, d: 9, floors: 1, color: 0xd6a06c, style: "shop", roof: "gable", front: 1,
         });
         continue;
       }
 
-      // D. Pharmacie & Dispensaire (gx 2, gz 2)
-      if (gx === 2 && gz === 2) {
+      // 4. Pharmacie & Dispensaire (gx 5, gz 4)
+      if (gx === 5 && gz === 4) {
         buildPharmacy(cx, cz);
         addTree(cx + 8, cz + 8, 1.2);
         continue;
       }
 
-      // E. Station Service Cobil (gx 5, gz 4)
-      if (gx === 5 && gz === 4) {
+      // 5. Station-Service Cobil & Total (gx 10, gz 5)
+      if (gx === 10 && gz === 5) {
         // Grand auvent métallique au-dessus des pistes de carburant
         add(roofMetal, box(18, 0.4, 12, cx, 4.8, cz, 3));
         for (const sx of [-1, 1]) {
@@ -924,7 +1186,7 @@ export function buildCity(scene: THREE.Scene, _quality: Quality): CityResult {
             add(steelMat, pillar);
           }
         }
-        // Pompes à essence (rouge/bleu Cobil)
+        // Pompes à essence (rouge Total / bleu Cobil)
         for (const sx of [-1, 1]) {
           add(metalMat, tint(box(1.2, 1.6, 0.8, cx + sx * 4.5, 0.9, cz, 1), 0xdc2626));
           add(metalMat, tint(box(1.2, 1.6, 0.8, cx + sx * 4.5, 0.9, cz + 2.5, 1), 0x2563eb));
@@ -936,22 +1198,51 @@ export function buildCity(scene: THREE.Scene, _quality: Quality): CityResult {
         continue;
       }
 
-      // F. Mairie de Beni / Administration (gx 3, gz 4)
-      if (gx === 3 && gz === 4) {
-        // Façade imposante avec colonnes et drapeau congolais
+      // 6. Mairie de Beni / Hôtel de Ville (gx 6, gz 7)
+      if (gx === 6 && gz === 7) {
         building({
           x: cx, z: cz - 4, w: 26, d: 14, floors: 2, color: 0xf1ede6, style: "office", roof: "flat", front: 1,
         });
-        // Mât de drapeau
         const pole = new THREE.CylinderGeometry(0.08, 0.08, 9, 6);
         pole.translate(cx, 4.8, cz + 10);
         add(steelMat, pole);
-        // Drapeau RDC
         add(paintMat, tint(box(1.8, 1.1, 0.04, cx + 0.9, 8.5, cz + 10, 1), 0x0284c7));
         continue;
       }
 
-      // G. Grand Marché Central (gx 4, gz 4)
+      // 7. Commissariat Central de Police (gx 7, gz 6)
+      if (gx === 7 && gz === 6) {
+        building({
+          x: cx, z: cz, w: 22, d: 12, floors: 2, color: 0x2c4f7c, style: "office", roof: "flat", front: 1,
+        });
+        // Mât d'antenne radio télécom
+        const ant = new THREE.CylinderGeometry(0.06, 0.1, 14, 6);
+        ant.translate(cx + 8, 11, cz);
+        add(steelMat, ant);
+        continue;
+      }
+
+      // 8. Place du Rond-Point Central & Monument de la Paix (gx 7, gz 7)
+      if (gx === 7 && gz === 7) {
+        // Terrasse circulaire centrale avec obélisque et fontaine
+        add(sidewalkMat, box(28, 0.4, 28, cx, 0.2, cz, 4));
+        const pedestal = new THREE.BoxGeometry(4, 2, 4);
+        pedestal.translate(cx, 1.2, cz);
+        add(wallMat, tint(pedestal, 0xf1ede6));
+        const obelisk = new THREE.CylinderGeometry(0.5, 1.2, 8, 4);
+        obelisk.translate(cx, 6.2, cz);
+        obelisk.rotateY(Math.PI / 4);
+        add(wallMat, tint(obelisk, 0xe2e8f0));
+        colliders.push({ x: cx, z: cz, hw: 3, hd: 3 });
+        for (let a = 0; a < 4; a++) {
+          const px = cx + Math.cos((a * Math.PI) / 2) * 8.5;
+          const pz = cz + Math.sin((a * Math.PI) / 2) * 8.5;
+          addBanana(px, pz);
+        }
+        continue;
+      }
+
+      // 9. Grand Marché Central (gx 9, gz 7)
       if (kind === "market") {
         add(sidewalkMat, box(inner - 1, 0.34, inner - 1, cx, 0.2, cz, 4));
         for (let r = 0; r < 4; r++) {
@@ -967,14 +1258,13 @@ export function buildCity(scene: THREE.Scene, _quality: Quality): CityResult {
             colliders.push({ x: ux, z: uz + 1.1, hw: 1.2, hd: 0.75 });
           }
         }
-        // Hangar central en tôle
         add(roofMetal, box(16, 0.3, 8, cx, 4.4, cz, 3));
         const Fh = faceOf(cx, cz, 16, 8, 1);
         add(signMat, Fh.put(signPlane(12, 0.65, ROW_MARKET, SIGN_ROWS), 0, 4.4, 0.04));
         continue;
       }
 
-      // H. Stade du 15 Octobre (gx 6, gz 3)
+      // 10. Grand Stade Municipal du 15 Octobre (gx 11, gz 7)
       if (kind === "stadium") {
         add(grassMat, box(26, 0.36, 20, cx, 0.2, cz, 6));
         add(lineWhite, box(26.4, 0.05, 0.2, cx, 0.4, cz - 10, 1));
@@ -988,22 +1278,53 @@ export function buildCity(scene: THREE.Scene, _quality: Quality): CityResult {
         continue;
       }
 
-      // I. Cathédrale Saint-Gustave (gx 5, gz 7)
+      // 11. Cathédrale Saint-Gustave (gx 9, gz 10)
       if (kind === "church") {
         const white = 0xf1ede6;
         add(wallMat, tint(box(13, 9, 24, cx, 4.8, cz, 3.2), white));
         colliders.push({ x: cx, z: cz, hw: 7, hd: 12.5 });
-        // Tour clocher
         add(wallMat, tint(box(4.2, 19, 4.2, cx - 4.5, 9.8, cz - 13.5, 3.2), white));
         colliders.push({ x: cx - 4.5, z: cz - 13.5, hw: 2.5, hd: 2.5 });
-        // Croix au sommet
         add(paintMat, tint(box(0.3, 2.8, 0.3, cx - 4.5, 20.8, cz - 13.5, 1), 0xf1ede6));
         add(paintMat, tint(box(1.6, 0.3, 0.3, cx - 4.5, 21.2, cz - 13.5, 1), 0xf1ede6));
         gableRoof(cx, cz, 13, 24, 9.3, white, { pitch: 0.55, rusty: true, alongX: false });
         continue;
       }
 
-      // J. Espace vert / Parc (gx 1, gz 4 etc)
+      // 12. Campus Universitaire UCBC (gx 10, gz 11)
+      if (kind === "campus") {
+        building({
+          x: cx, z: cz - 6, w: 24, d: 12, floors: 2, color: 0xdfb09c, style: "office", roof: "flat", front: 1,
+        });
+        add(grassMat, box(24, 0.35, 10, cx, 0.2, cz + 8, 4));
+        addTree(cx - 7, cz + 8, 1.1);
+        addTree(cx + 7, cz + 8, 1.1);
+        continue;
+      }
+
+      // 13. Institut de Beni / Écoles (gx 4, gz 4)
+      if (kind === "school") {
+        building({
+          x: cx - 4, z: cz, w: 20, d: 10, floors: 1, color: 0xe9dfc8, style: "office", roof: "gable", front: 1,
+        });
+        const pole = new THREE.CylinderGeometry(0.06, 0.06, 7, 6);
+        pole.translate(cx + 10, 3.6, cz);
+        add(steelMat, pole);
+        add(paintMat, tint(box(1.4, 0.9, 0.03, cx + 10.7, 6.5, cz, 1), 0x0284c7));
+        continue;
+      }
+
+      // 14. Gare Routière & Dépôts Fret (gx 11, gz 4)
+      if (kind === "industrial") {
+        building({
+          x: cx - 6, z: cz, w: 16, d: 14, floors: 1, color: 0xc7d8be, style: "shop", roof: "flat", front: 1,
+        });
+        add(roofMetal, box(14, 0.3, 10, cx + 8, 3.8, cz, 2));
+        colliders.push({ x: cx + 8, z: cz, hw: 7, hd: 5 });
+        continue;
+      }
+
+      // 15. Espaces verts / Parcs
       if (kind === "park") {
         add(grassMat, box(inner - 2, 0.34, inner - 2, cx, 0.2, cz, 6));
         for (let k = 0; k < 12; k++) {
@@ -1015,10 +1336,55 @@ export function buildCity(scene: THREE.Scene, _quality: Quality): CityResult {
         continue;
       }
 
-      // K. Bâtiments standards (Commerces, Maisons individuelles, Bureaux)
-      const isCommercial = kind === "commercial";
-      if (isCommercial) {
-        // Deux commerces de front
+      // ── BÂTIMENTS STANDARDS PAR AMBIANCE DE QUARTIER ──
+
+      // A. Centre-Ville : immeubles 2 à 3 étages, rez-de-chaussée commercial, balcons
+      if (kind === "center") {
+        building({
+          x: cx - 7, z: cz, w: 13, d: 15, floors: 2 + (rnd() < 0.45 ? 1 : 0),
+          color: pick(WALL_COLORS), style: "shop", roof: "flat", front: 1,
+        });
+        building({
+          x: cx + 7, z: cz, w: 13, d: 15, floors: 2 + (rnd() < 0.45 ? 1 : 0),
+          color: pick(WALL_COLORS), style: "office", roof: "flat", front: 3,
+        });
+        continue;
+      }
+
+      // B. Zone Populaire (Malepe & Kalinda) : habitations serrées, toits rouillés, petits commerces
+      if (kind === "popular") {
+        building({
+          x: cx - 8, z: cz - 5, w: 9, d: 9, floors: 1,
+          color: pick(WALL_COLORS), style: "shop", roof: "gable", front: 1, rusty: true,
+        });
+        building({
+          x: cx + 8, z: cz - 5, w: 9, d: 9, floors: 1,
+          color: pick(WALL_COLORS), style: "house", roof: "gable", front: 1, rusty: true,
+        });
+        building({
+          x: cx, z: cz + 6, w: 12, d: 8, floors: 1,
+          color: pick(WALL_COLORS), style: "shop", roof: "gable", front: 3, rusty: true,
+        });
+        // Petit kiosque de rue (Airtel Money / Coiffure)
+        add(paintMat, tint(box(2.2, 2.2, 1.8, cx - 11, 1.2, cz + 8, 1), 0xdc2626));
+        colliders.push({ x: cx - 11, z: cz + 8, hw: 1.2, hd: 1.0 });
+        continue;
+      }
+
+      // C. Zone Périphérique (Kanzulinzuli, Paida, Mavivi) : parcelles agricoles, maisons espacées
+      if (kind === "peripheral") {
+        building({
+          x: cx - 6, z: cz, w: 10, d: 9, floors: 1,
+          color: pick(WALL_COLORS), style: "house", roof: "gable", front: 1, rusty: true,
+        });
+        // Champs de bananiers et manioc
+        for (let k = 0; k < 6; k++) addBanana(cx + 6 + (k % 2) * 4, cz - 8 + Math.floor(k / 2) * 6);
+        addTree(cx - 10, cz + 8, 1.2);
+        continue;
+      }
+
+      // D. Zone Commerciale Standard
+      if (kind === "commercial") {
         building({
           x: cx - 7, z: cz, w: 12, d: 14, floors: 1 + Math.floor(rnd() * 2),
           color: pick(WALL_COLORS), style: "shop", roof: rnd() < 0.6 ? "gable" : "flat", front: 1,
@@ -1027,18 +1393,19 @@ export function buildCity(scene: THREE.Scene, _quality: Quality): CityResult {
           x: cx + 7, z: cz, w: 12, d: 14, floors: 1 + Math.floor(rnd() * 2),
           color: pick(WALL_COLORS), style: "shop", roof: "gable", front: 1,
         });
-      } else {
-        // Maisons individuelles avec cour et bananiers
-        building({
-          x: cx - 6, z: cz - 4, w: 11, d: 11, floors: 1,
-          color: pick(WALL_COLORS), style: "house", roof: "gable", front: 1,
-        });
-        building({
-          x: cx + 6, z: cz + 4, w: 10, d: 10, floors: 1,
-          color: pick(WALL_COLORS), style: "house", roof: "gable", front: 3,
-        });
-        for (let k = 0; k < 3; k++) addBanana(cx + 8, cz - 8 + k * 4);
+        continue;
       }
+
+      // E. Zone Résidentielle Standard (Masiani etc)
+      building({
+        x: cx - 6, z: cz - 4, w: 11, d: 11, floors: 1,
+        color: pick(WALL_COLORS), style: "house", roof: "gable", front: 1,
+      });
+      building({
+        x: cx + 6, z: cz + 4, w: 10, d: 10, floors: 1,
+        color: pick(WALL_COLORS), style: "house", roof: "gable", front: 3,
+      });
+      for (let k = 0; k < 3; k++) addBanana(cx + 8, cz - 8 + k * 4);
     }
   }
 

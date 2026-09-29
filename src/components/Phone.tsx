@@ -12,6 +12,7 @@ interface Props {
   onProfile: () => void;
   onHome: () => void;
   onActivities: () => void;
+  onSetWeather?: (w: import("../game/environment").Weather) => void;
 }
 
 export default function Phone({
@@ -22,6 +23,7 @@ export default function Phone({
   onProfile,
   onHome,
   onActivities,
+  onSetWeather,
 }: Props) {
   const [tab, setTab] = useState<"home" | "missions" | "audio">("home");
   const [missions] = useState(() => loadMissionHistory());
@@ -59,8 +61,8 @@ export default function Phone({
       action: onProfile,
     },
     {
-      label: "Maison",
-      detail: "Cuisine, repos, décoration",
+      label: "Maison 3D",
+      detail: "Visiter ma maison 3D (Quartier Masiani)",
       icon: "🏠",
       action: onHome,
     },
@@ -206,6 +208,82 @@ export default function Phone({
                   className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-teal-300 transition-all duration-300"
                   style={{ width: `${Math.min(100, (hud.deliveriesDone / 20) * 100)}%` }}
                 />
+              </div>
+            </div>
+
+            {/* Widget Météo & Conduite */}
+            <div
+              className={`rounded-2xl p-3.5 ring-1 text-xs transition-colors ${
+                hud.weather === "rain"
+                  ? "bg-sky-950/50 ring-sky-400/35 text-sky-200"
+                  : hud.weather === "cloudy"
+                    ? "bg-slate-800/60 ring-slate-400/25 text-slate-200"
+                    : hud.weather === "fog"
+                      ? "bg-indigo-950/45 ring-indigo-400/30 text-indigo-200"
+                      : "bg-amber-950/30 ring-amber-400/25 text-amber-200"
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5 font-black uppercase tracking-wider text-[11px]">
+                  <span>
+                    {hud.weather === "rain"
+                      ? "🌧️"
+                      : hud.weather === "cloudy"
+                        ? "☁️"
+                        : hud.weather === "fog"
+                          ? "🌫️"
+                          : "☀️"}
+                  </span>
+                  <span>Météo Beni</span>
+                </div>
+                <span className="font-extrabold text-[10px] rounded px-1.5 py-0.5 bg-white/10">
+                  {hud.weather === "rain"
+                    ? "Pluie tropicale"
+                    : hud.weather === "cloudy"
+                      ? "Ciel très couvert"
+                      : hud.weather === "fog"
+                        ? "Brume matinale"
+                        : "Beau temps ensoleillé"}
+                </span>
+              </div>
+              <div className="mt-2 text-[11px] leading-relaxed text-white/80">
+                {hud.weather === "rain"
+                  ? "⚠️ Routes inondées et glissantes : Vitesse de pointe réduite (-28%), adhérence minimale (-45%). Particules de pluie et éclaboussures actives !"
+                  : hud.weather === "cloudy"
+                    ? "☁️ Humidité élevée et sol lourd : Vitesse ralentie de 12%, adhérence réduite de 18%. Ombres de nuages mouvantes au sol."
+                    : hud.weather === "fog"
+                      ? "🌫️ Visibilité réduite : Vitesse limitée (-16%), nappes de brume volumétrique flottant au sol."
+                      : "✅ Conditions optimales : 100% d'adhérence et motricité maximale sur l'asphalte sec."}
+              </div>
+
+              {/* Sélecteur météo en direct pour tester les effets */}
+              <div className="mt-3 flex items-center justify-between gap-1 pt-2.5 border-t border-white/10">
+                <span className="text-[10px] font-bold text-white/60">Simuler :</span>
+                <div className="flex items-center gap-1">
+                  {(
+                    [
+                      { id: "sunny", label: "☀️ Soleil" },
+                      { id: "cloudy", label: "☁️ Nuages" },
+                      { id: "rain", label: "🌧️ Pluie" },
+                      { id: "fog", label: "🌫️ Brume" },
+                    ] as const
+                  ).map((w) => (
+                    <button
+                      key={w.id}
+                      onClick={() => {
+                        audio.click();
+                        onSetWeather?.(w.id);
+                      }}
+                      className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition-all ${
+                        hud.weather === w.id
+                          ? "bg-white/30 text-white ring-1 ring-white/50 shadow-sm"
+                          : "bg-white/5 text-white/60 hover:bg-white/15 hover:text-white"
+                      }`}
+                    >
+                      {w.label}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
 

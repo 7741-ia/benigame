@@ -24,8 +24,9 @@ import {
   type HighScore,
 } from "./game/storage";
 import { getVehicle } from "./game/vehicles";
-import { POIS, landmarkWorld, type PoiType } from "./game/districts";
-import type { LifeState, PlayerProfile, Recipe } from "./game/life";
+import type { PoiType } from "./game/districts";
+import type { LifeState, PlayerProfile } from "./game/life";
+import type { Weather } from "./game/environment";
 import Minimap from "./components/Minimap";
 import TouchControls from "./components/TouchControls";
 import Garage from "./components/Garage";
@@ -117,7 +118,7 @@ export default function App() {
   const [mapOpen, setMapOpen] = useState(false);
   const [phoneOpen, setPhoneOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
-  const [lifePanel, setLifePanel] = useState<"home" | "market" | "activities" | null>(null);
+  const [lifePanel, setLifePanel] = useState<"market" | "activities" | null>(null);
   const [tvRemoteOpen, setTvRemoteOpen] = useState(false);
   const [cruiseOpen, setCruiseOpen] = useState(false);
   const [isPortrait, setIsPortrait] = useState(() => {
@@ -253,7 +254,9 @@ export default function App() {
         setHighScores(addHighScore(score, money));
       },
       onPoiUsed: (kind: PoiType, label: string) => {
-        if (kind === "home") setLifePanel("home");
+        if (kind === "home") {
+          pushMessage("Bienvenue chez toi !", "Explore ta vraie maison 3D à pied");
+        }
         if (kind === "market") setLifePanel("market");
         if (kind === "leisure") setLifePanel("activities");
         if (kind === "clothing") setProfileOpen(true);
@@ -263,11 +266,16 @@ export default function App() {
       onArrived: (label) => {
         pushMessage("Destination atteinte", label);
         if (label.toLowerCase().includes("maison")) {
-          gameRef.current?.pause();
-          setLifePanel("home");
+          pushMessage("Arrivé à la maison !", "Descends de ton véhicule et entre visiter en 3D");
         }
       },
       onNpcGreet: (message) => pushMessage(message, "Le passant te répond."),
+      onCookMeal: (mealName) => {
+        pushMessage("Cuisson terminée !", `Délicieux ${mealName} préparé sur la cuisinière 3D`);
+      },
+      onEatMeal: (mealName) => {
+        pushMessage("Bon appétit !", `Tu as dégusté ${mealName} à la table de la salle à manger`);
+      },
     });
     game.setVehicle(loadSelected());
     game.setAppearance(profile);
@@ -282,6 +290,13 @@ export default function App() {
     audio.resume();
     audio.click();
     gameRef.current?.start(career.highestLevel, upgrades, wallet);
+  }, [career.highestLevel, upgrades, wallet]);
+
+  const startAtHome3D = useCallback(() => {
+    audio.resume();
+    audio.click();
+    gameRef.current?.start(career.highestLevel, upgrades, wallet);
+    gameRef.current?.visitHome3D();
   }, [career.highestLevel, upgrades, wallet]);
 
   const openGarage = useCallback(() => {
@@ -363,6 +378,14 @@ export default function App() {
     audio.click();
   }, []);
 
+  const cycleWeather = useCallback(() => {
+    const list: Weather[] = ["sunny", "cloudy", "rain", "fog"];
+    const currIdx = list.indexOf(hud.weather);
+    const nextW = list[(currIdx + 1) % list.length];
+    audio.click();
+    gameRef.current?.setWeather(nextW);
+  }, [hud.weather]);
+
   const handleTouch = useCallback((t: number, s: number, b: boolean) => {
     gameRef.current?.setTouchInput(t, s, b);
   }, []);
@@ -410,14 +433,11 @@ export default function App() {
   );
 
   const goHome = useCallback(() => {
-    const home = POIS.find((poi) => poi.type === "home");
-    if (!home) return;
-    if (hud.phase === "levelup") gameRef.current?.exploreFreeRoam();
-    if (hud.phase === "paused") gameRef.current?.resume();
-    const [x, z] = landmarkWorld(home);
-    gameRef.current?.setNavigation(x, z, home.name);
     setPhoneOpen(false);
     setMapOpen(false);
+    if (hud.phase === "levelup") gameRef.current?.exploreFreeRoam();
+    if (hud.phase === "paused") gameRef.current?.resume();
+    gameRef.current?.visitHome3D();
   }, [hud.phase]);
 
   const closeLifePanel = useCallback(() => {
@@ -443,36 +463,6 @@ export default function App() {
     [syncWallet]
   );
 
-  const cookRecipe = useCallback((recipe: Recipe) => {
-    setLife((current) => {
-      const canCook = Object.entries(recipe.ingredients).every(
-        ([key, amount]) => (current.ingredients[key] || 0) >= amount
-      );
-      if (!canCook) return current;
-      const ingredients = { ...current.ingredients };
-      Object.entries(recipe.ingredients).forEach(([key, amount]) => {
-        ingredients[key] = Math.max(0, (ingredients[key] || 0) - amount);
-      });
-      const next = { ...current, ingredients, recipesCooked: current.recipesCooked + 1 };
-      next.preparedMeals = [...current.preparedMeals, recipe.id];
-      saveLife(next);
-      return next;
-    });
-  }, []);
-
-  const eatRecipe = useCallback((recipe: Recipe) => {
-    setLife((current) => {
-      const index = current.preparedMeals.indexOf(recipe.id);
-      if (index < 0) return current;
-      const preparedMeals = [...current.preparedMeals];
-      preparedMeals.splice(index, 1);
-      const next = { ...current, preparedMeals };
-      saveLife(next);
-      gameRef.current?.eatHomeMeal(recipe.energy);
-      return next;
-    });
-  }, []);
-
   const buyIngredient = useCallback(
     (ingredient: string) => {
       if (!spend(2)) return;
@@ -484,19 +474,6 @@ export default function App() {
             [ingredient]: (current.ingredients[ingredient] || 0) + 1,
           },
         };
-        saveLife(next);
-        return next;
-      });
-    },
-    [spend]
-  );
-
-  const buyFurniture = useCallback(
-    (item: string, price: number) => {
-      if (!spend(price)) return;
-      setLife((current) => {
-        if (current.furniture.includes(item)) return current;
-        const next = { ...current, furniture: [...current.furniture, item] };
         saveLife(next);
         return next;
       });
@@ -610,7 +587,50 @@ export default function App() {
                     />
                   </div>
                 </div>
-                <span className="text-[9px] text-white/50">{hud.clock}</span>
+                <div className="flex items-center gap-1.5 text-[9px]">
+                  <span className="text-white/50">{hud.clock}</span>
+                  <span className="text-white/20">·</span>
+                  <button
+                    onClick={cycleWeather}
+                    className={`flex items-center gap-1 rounded-md px-1.5 py-0.5 font-black border transition-all cursor-pointer hover:scale-105 active:scale-95 ${
+                      hud.weather === "rain"
+                        ? "border-sky-400/40 bg-sky-950/70 text-sky-300 ring-1 ring-sky-400/30 animate-pulse"
+                        : hud.weather === "cloudy"
+                          ? "border-slate-400/30 bg-slate-800/80 text-slate-200"
+                          : hud.weather === "fog"
+                            ? "border-indigo-400/30 bg-indigo-950/70 text-indigo-200"
+                            : "border-amber-400/30 bg-amber-950/60 text-amber-300"
+                    }`}
+                    title={
+                      hud.weather === "rain"
+                        ? "🌧️ Pluie : Gouttes denses, éclaboussures et chaussée glissante (-28% vit., -45% grip). Cliquer pour changer la météo."
+                        : hud.weather === "cloudy"
+                          ? "☁️ Nuageux : Ombres au sol et asphalte lourd (-12% vit., -18% grip). Cliquer pour changer la météo."
+                          : hud.weather === "fog"
+                            ? "🌫️ Brume : Nappes de brouillard volumétrique au sol (-16% vit.). Cliquer pour changer la météo."
+                            : "☀️ Ensoleillé : Sol sec, motricité maximale (100% grip). Cliquer pour changer la météo."
+                    }
+                  >
+                    <span>
+                      {hud.weather === "rain"
+                        ? "🌧️"
+                        : hud.weather === "cloudy"
+                          ? "☁️"
+                          : hud.weather === "fog"
+                            ? "🌫️"
+                            : "☀️"}
+                    </span>
+                    <span className="hidden sm:inline">
+                      {hud.weather === "rain"
+                        ? "Pluie (-28%)"
+                        : hud.weather === "cloudy"
+                          ? "Couvert (-12%)"
+                          : hud.weather === "fog"
+                            ? "Brume (-16%)"
+                            : "Soleil"}
+                    </span>
+                  </button>
+                </div>
               </div>
 
               {/* Minuteur si mission en cours */}
@@ -688,11 +708,26 @@ export default function App() {
                   )}
                 </div>
               )}
+
+              {/* Indicateur de pièce 3D dans la maison */}
+              {hud.interiorRoom && (
+                <div className="mt-1 flex items-center gap-1.5 rounded-xl border border-amber-400/40 bg-amber-950/85 px-2.5 py-1 text-[11px] font-black text-amber-200 shadow-lg backdrop-blur-md">
+                  <span>🏡</span>
+                  <span>Maison — {hud.interiorRoom}</span>
+                </div>
+              )}
             </div>
 
             {/* DROITE : Raccourcis système & Minimap compacte */}
             <div className="pointer-events-auto flex flex-col items-end gap-1">
               <div className="flex items-center gap-1">
+                <button
+                  onClick={() => gameRef.current?.visitHome3D()}
+                  className="flex h-7 w-7 items-center justify-center rounded-xl border border-emerald-400/40 bg-emerald-950/70 text-xs backdrop-blur-md shadow-md active:scale-90"
+                  title="Aller à ma maison 3D (À pied)"
+                >
+                  🏡
+                </button>
                 <button
                   onClick={openMap}
                   className="flex h-7 w-7 items-center justify-center rounded-xl border border-sky-400/30 bg-black/45 text-xs backdrop-blur-md shadow-md active:scale-90"
@@ -751,6 +786,22 @@ export default function App() {
                     {hud.cruiseOn ? `${hud.cruiseTarget} km/h` : "OFF"}
                   </span>
                 </div>
+                {hud.weather !== "sunny" && (
+                  <div
+                    className={`mt-1 flex items-center justify-end gap-1 text-[8px] font-black tracking-tight ${
+                      hud.weather === "rain"
+                        ? "text-sky-300 animate-pulse"
+                        : hud.weather === "cloudy"
+                          ? "text-slate-300"
+                          : "text-indigo-300"
+                    }`}
+                  >
+                    <span>{hud.weather === "rain" ? "🌧️ Glissant" : hud.weather === "cloudy" ? "☁️ Sol lourd" : "🌫️ Brume"}</span>
+                    <span className="opacity-75">
+                      {hud.weather === "rain" ? "(-28%)" : hud.weather === "cloudy" ? "(-12%)" : "(-16%)"}
+                    </span>
+                  </div>
+                )}
               </button>
 
               {/* Popover compact du régulateur (ouvert uniquement au clic) */}
@@ -848,7 +899,7 @@ export default function App() {
           {/* Bottom-right speedometer (desktop PC only) */}
           {hud.playerMode === "vehicle" && !isTouchDevice && (
             <div className="pointer-events-none absolute bottom-3 right-3 z-10">
-              <Speedometer speed={hud.speed} max={hud.maxSpeed} />
+              <Speedometer speed={hud.speed} max={hud.maxSpeed} weather={hud.weather} />
             </div>
           )}
 
@@ -938,6 +989,13 @@ export default function App() {
                 className="w-full rounded-2xl bg-gradient-to-r from-emerald-400 to-green-600 py-4 text-xl font-black shadow-lg shadow-emerald-900/50 transition-transform active:scale-95"
               >
                 ▶ JOUER
+              </button>
+              <button
+                onClick={startAtHome3D}
+                className="w-full rounded-2xl border border-emerald-400/40 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 py-3.5 text-base font-black text-white shadow-xl shadow-emerald-950/50 transition-transform active:scale-95 flex items-center justify-center gap-2"
+              >
+                <span className="text-xl">🏡</span>
+                <span>VISITER MA VRAIE MAISON 3D</span>
               </button>
               <div className="flex gap-3">
                 <button
@@ -1211,6 +1269,7 @@ export default function App() {
             setPhoneOpen(false);
             setLifePanel("activities");
           }}
+          onSetWeather={(w) => gameRef.current?.setWeather(w)}
         />
       )}
 
@@ -1237,7 +1296,6 @@ export default function App() {
       {lifePanel && (
         <HomePanel
           life={life}
-          profile={profile}
           wallet={hud.money}
           mode={lifePanel}
           onClose={closeLifePanel}
@@ -1245,14 +1303,7 @@ export default function App() {
             setLifePanel(null);
             setMapOpen(true);
           }}
-          onRest={() => gameRef.current?.restAtHome()}
-          onSleep={() => gameRef.current?.sleepAtHome()}
-          onWash={() => gameRef.current?.washAtHome()}
-          onSit={() => gameRef.current?.sitAtHome()}
-          onCook={cookRecipe}
-          onEat={eatRecipe}
           onBuyIngredient={buyIngredient}
-          onBuyFurniture={buyFurniture}
           onParty={hostParty}
         />
       )}

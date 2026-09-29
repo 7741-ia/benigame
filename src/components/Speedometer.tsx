@@ -1,4 +1,12 @@
-export default function Speedometer({ speed, max }: { speed: number; max: number }) {
+export default function Speedometer({
+  speed,
+  max,
+  weather,
+}: {
+  speed: number;
+  max: number;
+  weather?: "sunny" | "cloudy" | "rain" | "fog";
+}) {
   const pct = Math.max(0, Math.min(1, speed / max));
   const startAngle = 135;
   const sweep = 270;
@@ -21,23 +29,58 @@ export default function Speedometer({ speed, max }: { speed: number; max: number
   const needleY = cy + (r - 8) * Math.sin((angle * Math.PI) / 180);
 
   return (
-    <div className="relative">
-      <svg width="110" height="110" viewBox="0 0 110 110">
-        <path d={arc(1)} fill="none" stroke="rgba(255,255,255,0.15)" strokeWidth="8" strokeLinecap="round" />
-        <path
-          d={arc(pct || 0.001)}
-          fill="none"
-          stroke={pct > 0.8 ? "#ef4444" : pct > 0.5 ? "#f59e0b" : "#22d3ee"}
-          strokeWidth="8"
-          strokeLinecap="round"
-        />
-        <line x1={cx} y1={cy} x2={needleX} y2={needleY} stroke="#fff" strokeWidth="2.5" strokeLinecap="round" />
-        <circle cx={cx} cy={cy} r="4" fill="#fff" />
-      </svg>
-      <div className="absolute inset-0 flex flex-col items-center justify-center pt-3">
-        <span className="text-2xl font-black leading-none">{speed}</span>
-        <span className="text-[9px] font-bold opacity-60">km/h</span>
+    <div className="relative flex flex-col items-center">
+      <div className="relative">
+        <svg width="110" height="110" viewBox="0 0 110 110">
+          <path d={arc(1)} fill="none" stroke="rgba(255,255,255,0.15)" strokeWidth="8" strokeLinecap="round" />
+          <path
+            d={arc(pct || 0.001)}
+            fill="none"
+            stroke={
+              weather === "rain"
+                ? pct > 0.8
+                  ? "#ef4444"
+                  : "#38bdf8"
+                : pct > 0.8
+                  ? "#ef4444"
+                  : pct > 0.5
+                    ? "#f59e0b"
+                    : "#22d3ee"
+            }
+            strokeWidth="8"
+            strokeLinecap="round"
+          />
+          <line x1={cx} y1={cy} x2={needleX} y2={needleY} stroke="#fff" strokeWidth="2.5" strokeLinecap="round" />
+          <circle cx={cx} cy={cy} r="4" fill="#fff" />
+        </svg>
+        <div className="absolute inset-0 flex flex-col items-center justify-center pt-2">
+          <span className="text-2xl font-black leading-none">{Math.round(speed)}</span>
+          <span className="text-[9px] font-bold opacity-60">km/h</span>
+        </div>
       </div>
+      {weather && weather !== "sunny" && (
+        <div
+          className={`-mt-1 flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-black border backdrop-blur-md ${
+            weather === "rain"
+              ? "border-sky-400/50 bg-sky-950/80 text-sky-200 ring-1 ring-sky-400/30 animate-pulse"
+              : weather === "cloudy"
+                ? "border-slate-400/40 bg-slate-900/80 text-slate-300"
+                : "border-indigo-400/40 bg-indigo-950/80 text-indigo-200"
+          }`}
+          title={
+            weather === "rain"
+              ? "Pluie : Vitesse de pointe -28%, adhérence réduite (-45%)"
+              : weather === "cloudy"
+                ? "Nuages denses : Vitesse ralentie (-12%), chaussée glissante (-18%)"
+                : "Brouillard : Vitesse -16%"
+          }
+        >
+          <span>{weather === "rain" ? "🌧️" : weather === "cloudy" ? "☁️" : "🌫️"}</span>
+          <span>
+            {weather === "rain" ? "Grip -45%" : weather === "cloudy" ? "Grip -18%" : "Grip -22%"}
+          </span>
+        </div>
+      )}
     </div>
   );
 }

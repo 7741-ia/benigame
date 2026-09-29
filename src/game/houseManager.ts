@@ -60,11 +60,18 @@ export class HouseManager {
   public frontDoorGroup: THREE.Group | null = null;
   public bedroomDoorGroup: THREE.Group | null = null;
   public bathroomDoorGroup: THREE.Group | null = null;
+  public fridgeDoorGroup: THREE.Group | null = null;
+  public roofGroup: THREE.Group | null = null;
   public tvScreenMesh: THREE.Mesh | null = null;
   public waterStreamMesh: THREE.Mesh | null = null;
   public showerSprayMesh: THREE.Mesh | null = null;
   public stoveFlameMesh: THREE.Mesh | null = null;
   public ceilingLight: THREE.PointLight | null = null;
+
+  // Position joueur pour détection d'intérieur
+  public playerX = 0;
+  public playerZ = 0;
+  public isInside = false;
 
   constructor() {
     this.tv = new InteractiveTV();
@@ -73,6 +80,16 @@ export class HouseManager {
   initHouseCoordinates(hx: number, hz: number) {
     this.hx = hx;
     this.hz = hz;
+  }
+
+  setPlayerPos(x: number, z: number) {
+    this.playerX = x;
+    this.playerZ = z;
+    const inside = Math.abs(x - this.hx) < 6.8 && Math.abs(z - this.hz) < 5.3;
+    this.isInside = inside;
+    if (this.roofGroup) {
+      this.roofGroup.visible = !inside;
+    }
   }
 
   update(dt: number) {
@@ -93,6 +110,10 @@ export class HouseManager {
     if (this.bathroomDoorGroup) {
       const targetRot = this.state.bathroomDoorOpen ? Math.PI * 0.48 : 0;
       this.bathroomDoorGroup.rotation.y += (targetRot - this.bathroomDoorGroup.rotation.y) * Math.min(1, dt * 10);
+    }
+    if (this.fridgeDoorGroup) {
+      const targetRot = this.state.fridgeOpen ? -Math.PI * 0.45 : 0;
+      this.fridgeDoorGroup.rotation.y += (targetRot - this.fridgeDoorGroup.rotation.y) * Math.min(1, dt * 10);
     }
 
     // Animation eau de l'évier
@@ -227,7 +248,7 @@ export class HouseManager {
         type: "tv",
         title: "Télévision",
         prompt: this.tv.isOn ? `Regarder TV (${CHANNELS[this.tv.channel].name})` : "Allumer la télévision",
-        actionText: this.tv.isOn ? "Zapper" : "Allumer",
+        actionText: "Utiliser",
         icon: "📺",
         x: hx - 5.2,
         z: hz + 1.4,
@@ -323,7 +344,7 @@ export class HouseManager {
         type: "shower",
         title: "Douche",
         prompt: this.state.showerActive ? "Couper la douche" : "Prendre une douche",
-        actionText: this.state.showerActive ? "Couper" : "Douche",
+        actionText: this.state.showerActive ? "Couper" : "Prendre une douche",
         icon: "🚿",
         x: hx + 4.8,
         z: hz - 3.8,
