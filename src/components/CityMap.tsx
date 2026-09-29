@@ -1,253 +1,745 @@
-import { useMemo, useRef, useState } from "react";
-import { DISTRICTS, POIS, landmarkWorld, type PoiType } from "../game/districts";
-import { CELL, GRID_LINES, HALF, WORLD } from "../game/constants";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import type { HudState } from "../game/types";
-
-interface MapPlace {
-  id: string;
-  name: string;
-  short: string;
-  emoji: string;
-  kind: string;
-  x: number;
-  z: number;
-}
+import { CELL, GRID_LINES, HALF, WORLD } from "../game/constants";
+import {
+  calculateRoadRoute,
+  formatDistance,
+  getEnrichedMapPlaces,
+  type MapPlace,
+  type RoadRoute,
+} from "../game/navigation";
+import { getDistrictAt } from "../game/districts";
 
 interface Props {
   hud: HudState;
+  getLivePlayerState?: () => {
+    playerX: number;
+    playerZ: number;
+    playerHeading: number;
+    playerMode: "vehicle" | "walk";
+    vehicleType: string;
+    vehicleName: string;
+    targetX: number;
+    targetZ: number;
+    targetLabel: string;
+    hasActiveDestination: boolean;
+    hasPackage: boolean;
+    vehicleX: number;
+    vehicleZ: number;
+    currentDistrict: string;
+    speedKmh: number;
+  };
   onNavigate: (x: number, z: number, label: string) => void;
   onCancelNavigation: () => void;
   onClose: () => void;
 }
 
-const poiActivities: Record<PoiType, string> = {
-  shop: "Acheter un véhicule ou améliorer son équipement",
-  restaurant: "Manger, discuter et récupérer de l'énergie",
-  kiosk: "Acheter une boisson et recharger le nitro",
-  home: "Dormir, cuisiner, décorer et recevoir des amis",
-  market: "Acheter des ingrédients pour cuisiner",
-  clothing: "Changer de tenue et acheter des accessoires",
-  leisure: "Rencontrer des amis, danser et participer aux événements",
-  pharmacy: "Acheter des soins médicaux et récupérer de la santé",
-  fuel: "Faire le plein de carburant et entretenir le véhicule",
-  admin: "Démarches administratives et services de la mairie",
-};
-
-const colorFor = (kind: string) => {
-  if (kind === "shop" || kind === "clothing" || kind === "market") return "#fbbf24";
-  if (kind === "restaurant") return "#4ade80";
-  if (kind === "kiosk") return "#22d3ee";
-  if (kind === "home") return "#f472b6";
-  if (kind === "leisure") return "#c084fc";
+const colorFor = (kind: string, type: string) => {
+  if (type === "home") return "#ec4899"; // rose
+  if (type === "restaurant") return "#22c55e"; // vert
+  if (type === "shop" || type === "market" || type === "clothing") return "#f59e0b"; // ambre
+  if (type === "fuel") return "#ef4444"; // rouge
+  if (type === "pharmacy") return "#06b6d4"; // cyan
+  if (type === "kiosk") return "#38bdf8"; // bleu ciel
+  if (type === "leisure") return "#a855f7"; // violet
+  if (kind.includes("Quartier")) return "#3b82f6"; // bleu
   return "#e2e8f0";
 };
 
-export default function CityMap({ hud, onNavigate, onCancelNavigation, onClose }: Props) {
-  const [zoom, setZoom] = useState(1);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
-  const [selected, setSelected] = useState<MapPlace | null>(null);
-  const [filter, setFilter] = useState<"all" | "district" | "activity">("all");
-  const drag = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
+// Échelle SVG (0 à 1000 pour couvrir -HALF à +HALF)
+const SVG_SIZE = 1000;
+const MARGIN = 50;
+const MAP_SPAN = SVG_SIZE - MARGIN * 2; // 900
+const toMap = (val: number) => ((val + HALF) / WORLD) * MAP_SPAN + MARGIN;
+const fromMap = (px: number) => ((px - MARGIN) / MAP_SPAN) * WORLD - HALF;
 
-  const places = useMemo<MapPlace[]>(() => {
-    const districts = DISTRICTS.map((place, index) => {
-      const [x, z] = landmarkWorld(place);
-      return {
-        id: `district-${index}`,
-        name: place.name,
-        short: place.short,
-        emoji: place.emoji,
-        kind: place.kind,
-        x,
-        z,
-      };
-    });
-    const pois = POIS.map((place, index) => {
-      const [x, z] = landmarkWorld(place);
-      return {
-        id: `poi-${index}`,
-        name: place.name,
-        short: place.name,
-        emoji: place.emoji,
-        kind: place.type,
-        x,
-        z,
-      };
-    });
-    return [...districts, ...pois];
-  }, []);
-
-  const visiblePlaces = places.filter((place) => {
-    if (filter === "all") return true;
-    if (filter === "activity") return place.kind in poiActivities;
-    return !(place.kind in poiActivities);
+export default function CityMap({
+  hud,
+  getLivePlayerState,
+  onNavigate,
+  onCancelNavigation,
+  onClose,
+}: Props) {
+  // ── ÉTAT JOUEUR EN TEMPS RÉEL (60 FPS) ──
+  const [liveState, setLiveState] = useState(() => {
+    const live = getLivePlayerState?.();
+    return {
+      x: live?.playerX ?? hud.playerX,
+      z: live?.playerZ ?? hud.playerZ,
+      heading: live?.playerHeading ?? hud.playerHeading,
+      mode: live?.playerMode ?? hud.playerMode,
+      vehicleType: live?.vehicleType ?? "moto",
+      vehicleName: live?.vehicleName ?? "Moto",
+      targetX: live?.targetX ?? hud.targetX,
+      targetZ: live?.targetZ ?? hud.targetZ,
+      targetLabel: live?.targetLabel ?? hud.targetLabel,
+      hasActiveDestination: live?.hasActiveDestination ?? hud.navActive,
+      district: live?.currentDistrict ?? getDistrictAt(hud.playerX, hud.playerZ),
+      speedKmh: live?.speedKmh ?? hud.speed,
+    };
   });
 
-  const toMap = (value: number) => ((value + HALF) / WORLD) * 900 + 50;
-  const player = { x: toMap(hud.playerX), y: toMap(hud.playerZ) };
-  const routeTarget = hud.navActive
-    ? { x: toMap(hud.navX), y: toMap(hud.navZ) }
-    : selected
-      ? { x: toMap(selected.x), y: toMap(selected.z) }
-      : null;
+  // ── MODES : SUIVI DU JOUEUR vs EXPLORATION LIBRE ──
+  const [followMode, setFollowMode] = useState<boolean>(true);
+  const [zoom, setZoom] = useState<number>(1.4);
+  const [pan, setPan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [selectedPlace, setSelectedPlace] = useState<MapPlace | null>(null);
+  const [filter, setFilter] = useState<"all" | "districts" | "shops" | "services">("all");
 
-  const zoomBy = (delta: number) => setZoom((z) => Math.max(0.75, Math.min(3, z + delta)));
+  const places = useMemo(() => getEnrichedMapPlaces(), []);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
+
+  // Synchronisation 60 FPS ultra-fluide avec le monde 3D
+  useEffect(() => {
+    let animId: number;
+    const loop = () => {
+      const live = getLivePlayerState?.();
+      if (live) {
+        setLiveState({
+          x: live.playerX,
+          z: live.playerZ,
+          heading: live.playerHeading,
+          mode: live.playerMode,
+          vehicleType: live.vehicleType,
+          vehicleName: live.vehicleName,
+          targetX: live.targetX,
+          targetZ: live.targetZ,
+          targetLabel: live.targetLabel,
+          hasActiveDestination: live.hasActiveDestination,
+          district: live.currentDistrict,
+          speedKmh: live.speedKmh,
+        });
+      }
+      animId = requestAnimationFrame(loop);
+    };
+    animId = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(animId);
+  }, [getLivePlayerState]);
+
+  // En Mode Suivi, la carte recentre continuellement sur le joueur
+  useEffect(() => {
+    if (!followMode) return;
+    const targetMapX = toMap(liveState.x);
+    const targetMapY = toMap(liveState.z);
+    // Centre le point joueur dans le viewport SVG (500, 500)
+    const targetPanX = 500 - targetMapX * zoom;
+    const targetPanY = 500 - targetMapY * zoom;
+    setPan({ x: targetPanX, y: targetPanY });
+  }, [followMode, liveState.x, liveState.z, zoom]);
+
+  // Recentre manuellement sur le joueur
+  const recenterOnPlayer = useCallback(() => {
+    const targetMapX = toMap(liveState.x);
+    const targetMapY = toMap(liveState.z);
+    setPan({
+      x: 500 - targetMapX * zoom,
+      y: 500 - targetMapY * zoom,
+    });
+    setFollowMode(true);
+  }, [liveState.x, liveState.z, zoom]);
+
+  // ── CALCUL D'ITINÉRAIRE ROUTIER EN TEMPS RÉEL ──
+  const activeRoute = useMemo<RoadRoute | null>(() => {
+    if (!liveState.hasActiveDestination) {
+      if (!selectedPlace) return null;
+      return calculateRoadRoute(
+        liveState.x,
+        liveState.z,
+        selectedPlace.x,
+        selectedPlace.z,
+        selectedPlace.name
+      );
+    }
+    return calculateRoadRoute(
+      liveState.x,
+      liveState.z,
+      liveState.targetX,
+      liveState.targetZ,
+      liveState.targetLabel
+    );
+  }, [
+    liveState.x,
+    liveState.z,
+    liveState.targetX,
+    liveState.targetZ,
+    liveState.targetLabel,
+    liveState.hasActiveDestination,
+    selectedPlace,
+  ]);
+
+  // ── GESTION TACTILE & SOURIS (DRAG, PINCH TO ZOOM, MOLETTE) ──
+  const dragRef = useRef<{
+    startX: number;
+    startY: number;
+    startPanX: number;
+    startPanY: number;
+    isDragging: boolean;
+  }>({ startX: 0, startY: 0, startPanX: 0, startPanY: 0, isDragging: false });
+
+  const touchesRef = useRef<{ dist: number; startZoom: number } | null>(null);
+
+  // Zoom contrôlé avec paliers
+  const zoomTier = zoom < 1.15 ? 1 : zoom < 1.9 ? 2 : zoom < 3.0 ? 3 : 4;
+  const zoomTierLabel =
+    zoomTier === 1
+      ? "Vue globale"
+      : zoomTier === 2
+        ? "Quartiers & Avenues"
+        : zoomTier === 3
+          ? "Rues & Commerces"
+          : "Détails précis";
+
+  const setZoomClamped = (newZoom: number) => {
+    const clamped = Math.max(0.75, Math.min(4.5, newZoom));
+    setZoom(clamped);
+  };
+
+  const handleWheel = (e: React.WheelEvent) => {
+    e.preventDefault();
+    const factor = e.deltaY < 0 ? 1.18 : 0.85;
+    setZoomClamped(zoom * factor);
+  };
+
+  const handlePointerDown = (e: React.PointerEvent) => {
+    dragRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      startPanX: pan.x,
+      startPanY: pan.y,
+      isDragging: true,
+    };
+    (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+  };
+
+  const handlePointerMove = (e: React.PointerEvent) => {
+    if (!dragRef.current.isDragging) return;
+    const dx = e.clientX - dragRef.current.startX;
+    const dy = e.clientY - dragRef.current.startY;
+    if (Math.hypot(dx, dy) > 5 && followMode) {
+      setFollowMode(false); // Bascule en Mode Exploration dès que l'utilisateur déplace la carte
+    }
+    setPan({
+      x: dragRef.current.startPanX + dx,
+      y: dragRef.current.startPanY + dy,
+    });
+  };
+
+  const handlePointerUp = (e: React.PointerEvent) => {
+    dragRef.current.isDragging = false;
+    (e.target as HTMLElement).releasePointerCapture?.(e.pointerId);
+  };
+
+  // Pinch-to-zoom sur smartphone
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length === 2) {
+      const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      touchesRef.current = { dist, startZoom: zoom };
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (e.touches.length === 2 && touchesRef.current) {
+      const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      const ratio = dist / touchesRef.current.dist;
+      setZoomClamped(touchesRef.current.startZoom * ratio);
+    }
+  };
+
+  const handleTouchEnd = () => {
+    touchesRef.current = null;
+  };
+
+  // ── FILTRAGE DES LIEUX SELON L'ONGLET & LE NIVEAU DE ZOOM ──
+  const visiblePlaces = useMemo(() => {
+    return places.filter((p) => {
+      // Filtre catégorie
+      if (filter === "districts" && p.type !== "district" && p.type !== "avenue") return false;
+      if (filter === "shops" && p.type !== "shop" && p.type !== "restaurant" && p.type !== "market" && p.type !== "clothing") return false;
+      if (filter === "services" && p.type !== "fuel" && p.type !== "pharmacy" && p.type !== "home" && p.type !== "kiosk") return false;
+
+      // Filtre densité de zoom pour ne pas surcharger la vue éloignée
+      if (zoomTier === 1 && p.minZoomTier > 1) return false;
+      if (zoomTier === 2 && p.minZoomTier > 2) return false;
+      return true;
+    });
+  }, [places, filter, zoomTier]);
+
+  // Rotation mathématiquement exacte du joueur (en degrés, 0° = vers le haut / Nord)
+  const playerAngleDeg = ((Math.PI - liveState.heading) * 180) / Math.PI;
+  const playerScreenX = toMap(liveState.x);
+  const playerScreenY = toMap(liveState.z);
+
+  // Icône du véhicule
+  const vehicleEmoji =
+    liveState.mode === "walk"
+      ? "🚶"
+      : liveState.vehicleType === "moto" || liveState.vehicleType === "scooter"
+        ? "🛵"
+        : liveState.vehicleType === "van"
+          ? "🚐"
+          : liveState.vehicleType === "tuktuk"
+            ? "🛺"
+            : "🚗";
 
   return (
-    <div className="absolute inset-0 z-[70] flex bg-slate-950/95 text-white backdrop-blur-xl">
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+    <div
+      ref={containerRef}
+      className="absolute inset-0 z-[70] flex flex-col bg-slate-950 text-white select-none overflow-hidden"
+    >
+      {/* ── BARRE SUPÉRIEURE : TITRE, STATUT GPS, RECHERCHE & COMMANDES ── */}
+      <header className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 bg-slate-900/90 px-4 py-2.5 backdrop-blur-md">
+        <div className="flex items-center gap-3">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-sky-500/20 text-xl ring-1 ring-sky-400/40">
+            🗺️
+          </div>
           <div>
-            <h2 className="text-xl font-black">Carte de Beni</h2>
-            <p className="text-xs text-white/55">Clique un lieu pour afficher l'itinéraire.</p>
+            <div className="flex items-center gap-2">
+              <h2 className="text-base font-black tracking-wide">Carte de Beni</h2>
+              <span className="flex items-center gap-1 rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-black text-emerald-300 ring-1 ring-emerald-500/30">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-ping" />
+                GPS EN DIRECT
+              </span>
+            </div>
+            <p className="text-xs text-white/60">
+              Quartier actuel : <span className="font-bold text-sky-300">{liveState.district}</span>
+              {liveState.speedKmh > 0 && ` • ${liveState.speedKmh} km/h`}
+            </p>
           </div>
-          <div className="flex gap-2">
-            {hud.navActive && (
-              <button onClick={onCancelNavigation} className="map-button text-red-300">Annuler</button>
-            )}
-            <button onClick={() => zoomBy(-0.25)} className="map-button">-</button>
-            <button onClick={() => zoomBy(0.25)} className="map-button">+</button>
-            <button onClick={onClose} className="map-button">Fermer</button>
-          </div>
-        </header>
+        </div>
 
-        <div className="flex gap-2 overflow-x-auto px-4 py-2 text-xs">
-          {(["all", "district", "activity"] as const).map((value) => (
+        {/* Boutons d'action rapides */}
+        <div className="flex items-center gap-2">
+          {/* Bouton Revenir au Joueur */}
+          <button
+            onClick={recenterOnPlayer}
+            className={`flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-black transition active:scale-95 ${
+              followMode
+                ? "bg-sky-400 text-slate-950 shadow-md shadow-sky-400/20"
+                : "bg-white/10 text-white hover:bg-white/15 ring-1 ring-white/20 animate-pulse"
+            }`}
+            title="Recentrer automatiquement la carte sur la position actuelle du joueur"
+          >
+            <span>📍</span>
+            <span>{followMode ? "Suivi actif" : "Revenir au joueur"}</span>
+          </button>
+
+          {/* Zoom In / Out */}
+          <div className="flex items-center rounded-xl bg-white/10 ring-1 ring-white/15">
             <button
-              key={value}
-              onClick={() => setFilter(value)}
-              className={`whitespace-nowrap rounded-lg px-3 py-1.5 font-bold ${
-                filter === value ? "bg-sky-400 text-slate-950" : "bg-white/10 text-white/70"
+              onClick={() => setZoomClamped(zoom - 0.35)}
+              className="px-2.5 py-1 text-sm font-black hover:bg-white/10 active:scale-90"
+              title="Dézoomer"
+            >
+              −
+            </button>
+            <span className="px-1 text-[10px] font-bold text-white/60">{zoom.toFixed(1)}x</span>
+            <button
+              onClick={() => setZoomClamped(zoom + 0.35)}
+              className="px-2.5 py-1 text-sm font-black hover:bg-white/10 active:scale-90"
+              title="Zoomer"
+            >
+              +
+            </button>
+          </div>
+
+          {/* Bouton Fermer */}
+          <button
+            onClick={onClose}
+            className="flex items-center gap-1 rounded-xl bg-red-500/20 px-3 py-1.5 text-xs font-black text-red-200 ring-1 ring-red-500/40 hover:bg-red-500/30 transition active:scale-95"
+            title="Revenir au jeu"
+          >
+            <span>✕</span>
+            <span className="hidden sm:inline">Fermer la carte</span>
+          </button>
+        </div>
+      </header>
+
+      {/* ── BANDEAU INFOS ITINÉRAIRE EN COURS (SI DESTINATION ACTIVE) ── */}
+      {activeRoute && (
+        <div className="flex items-center justify-between border-b border-sky-400/20 bg-sky-950/70 px-4 py-2 text-xs backdrop-blur-md">
+          <div className="flex items-center gap-3">
+            <div className="text-xl animate-bounce">📍</div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-black text-white">{activeRoute.targetLabel}</span>
+                <span className="rounded bg-sky-400/20 px-1.5 py-0.2 text-[10px] font-bold text-sky-300">
+                  {activeRoute.targetDistrict}
+                </span>
+              </div>
+              <p className="text-[11px] text-sky-200/80">
+                Itinéraire routier : <span className="font-extrabold text-amber-300">{formatDistance(activeRoute.distanceMeters)}</span> restant
+              </p>
+            </div>
+          </div>
+          {liveState.hasActiveDestination && (
+            <button
+              onClick={onCancelNavigation}
+              className="rounded-lg bg-red-500/20 px-2.5 py-1 text-[11px] font-black text-red-300 ring-1 ring-red-500/40 hover:bg-red-500/30"
+            >
+              Annuler guidage
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* ── FILTRES PAR CATÉGORIES & NIVEAU DE ZOOM ── */}
+      <div className="flex items-center justify-between gap-2 border-b border-white/5 bg-slate-900/60 px-4 py-1.5 text-xs">
+        <div className="flex gap-1.5 overflow-x-auto">
+          {(
+            [
+              { id: "all", label: "Tout afficher" },
+              { id: "districts", label: "Quartiers & Avenues" },
+              { id: "shops", label: "Commerces & Restos" },
+              { id: "services", label: "Services & Maison" },
+            ] as const
+          ).map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setFilter(t.id)}
+              className={`whitespace-nowrap rounded-lg px-2.5 py-1 text-[11px] font-bold transition ${
+                filter === t.id
+                  ? "bg-sky-400 text-slate-950 shadow"
+                  : "bg-white/5 text-white/70 hover:bg-white/10"
               }`}
             >
-              {value === "all" ? "Tout" : value === "district" ? "Quartiers et rues" : "Activités"}
+              {t.label}
             </button>
           ))}
         </div>
 
-        <div className="relative min-h-0 flex-1 overflow-hidden bg-[#211d17]">
-          <svg
-            viewBox="0 0 1000 1000"
-            className="h-full w-full touch-none"
-            onWheel={(event) => {
-              event.preventDefault();
-              zoomBy(event.deltaY < 0 ? 0.15 : -0.15);
-            }}
-            onPointerDown={(event) => {
-              drag.current = { x: event.clientX, y: event.clientY, panX: pan.x, panY: pan.y };
-              event.currentTarget.setPointerCapture(event.pointerId);
-            }}
-            onPointerMove={(event) => {
-              if (!drag.current) return;
-              setPan({
-                x: drag.current.panX + (event.clientX - drag.current.x) / zoom,
-                y: drag.current.panY + (event.clientY - drag.current.y) / zoom,
-              });
-            }}
-            onPointerUp={() => {
-              drag.current = null;
-            }}
-            onPointerCancel={() => {
-              drag.current = null;
-            }}
-          >
-            <g transform={`translate(${pan.x} ${pan.y}) scale(${zoom})`}>
-              <rect x="30" y="30" width="940" height="940" rx="32" fill="#30291d" />
-              {Array.from({ length: GRID_LINES }).map((_, index) => {
-                const p = toMap(index * CELL - HALF);
-                return (
-                  <g key={index} stroke="#737b86" strokeWidth="14" opacity="0.8">
-                    <line x1={p} x2={p} y1="50" y2="950" />
-                    <line x1="50" x2="950" y1={p} y2={p} />
-                  </g>
-                );
-              })}
+        <div className="hidden sm:flex items-center gap-1.5 text-[10px] font-semibold text-white/50">
+          <span>🔍 {zoomTierLabel}</span>
+        </div>
+      </div>
 
-              {routeTarget && (
+      {/* ── ZONE DE CARTE SVG INTERACTIVE & FLUIDE ── */}
+      <div
+        className="relative flex-1 cursor-grab active:cursor-grabbing bg-[#1e1b15] overflow-hidden touch-none"
+        onWheel={handleWheel}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+      >
+        <svg
+          ref={svgRef}
+          viewBox="0 0 1000 1000"
+          className="h-full w-full pointer-events-auto"
+        >
+          <defs>
+            {/* Lueur et effet tracé GPS */}
+            <filter id="routeGlow" x="-20%" y="-20%" width="140%" height="140%">
+              <feGaussianBlur stdDeviation="4" result="blur" />
+              <feComposite in="SourceGraphic" in2="blur" operator="over" />
+            </filter>
+            {/* Dégradé route */}
+            <linearGradient id="routeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stopColor="#38bdf8" />
+              <stop offset="100%" stopColor="#818cf8" />
+            </linearGradient>
+          </defs>
+
+          {/* Groupe transformé par PAN et ZOOM */}
+          <g transform={`translate(${pan.x} ${pan.y}) scale(${zoom})`}>
+            {/* Fond de terrain tropical de Beni */}
+            <rect x="30" y="30" width="940" height="940" rx="24" fill="#242018" />
+
+            {/* Îlots urbains & végétation */}
+            {Array.from({ length: GRID_LINES - 1 }).map((_, gx) =>
+              Array.from({ length: GRID_LINES - 1 }).map((_, gz) => {
+                const x = toMap(gx * CELL - HALF + CELL / 2);
+                const z = toMap(gz * CELL - HALF + CELL / 2);
+                const w = ((CELL - 16) / WORLD) * MAP_SPAN;
+                return (
+                  <rect
+                    key={`${gx}-${gz}`}
+                    x={x - w / 2}
+                    y={z - w / 2}
+                    width={w}
+                    height={w}
+                    rx="4"
+                    fill="#363124"
+                    stroke="#1a1813"
+                    strokeWidth="1"
+                    opacity="0.85"
+                  />
+                );
+              })
+            )}
+
+            {/* Réseau des avenues & routes asphaltées de Beni */}
+            {Array.from({ length: GRID_LINES }).map((_, index) => {
+              const p = toMap(index * CELL - HALF);
+              return (
+                <g key={`road-${index}`}>
+                  {/* Chaussée asphaltée */}
+                  <line x1={p} x2={p} y1={MARGIN} y2={SVG_SIZE - MARGIN} stroke="#596370" strokeWidth="11" strokeLinecap="square" />
+                  <line x1={MARGIN} x2={SVG_SIZE - MARGIN} y1={p} y2={p} stroke="#596370" strokeWidth="11" strokeLinecap="square" />
+                  {/* Ligne médiane de voirie */}
+                  <line x1={p} x2={p} y1={MARGIN} y2={SVG_SIZE - MARGIN} stroke="#8592a3" strokeWidth="1.2" strokeDasharray="8 6" opacity="0.6" />
+                  <line x1={MARGIN} x2={SVG_SIZE - MARGIN} y1={p} y2={p} stroke="#8592a3" strokeWidth="1.2" strokeDasharray="8 6" opacity="0.6" />
+                </g>
+              );
+            })}
+
+            {/* ── ITINÉRAIRE ROUTIER EN TEMPS RÉEL (Suit strictement les rues) ── */}
+            {activeRoute && activeRoute.points.length >= 2 && (
+              <g filter="url(#routeGlow)">
+                {/* Halo d'itinéraire */}
                 <polyline
-                  points={`${player.x},${player.y} ${routeTarget.x},${player.y} ${routeTarget.x},${routeTarget.y}`}
+                  points={activeRoute.points.map((pt) => `${toMap(pt.x)},${toMap(pt.z)}`).join(" ")}
                   fill="none"
-                  stroke="#38bdf8"
-                  strokeWidth="8"
-                  strokeDasharray="18 12"
+                  stroke="#0284c7"
+                  strokeWidth="10"
+                  strokeOpacity="0.4"
                   strokeLinecap="round"
                   strokeLinejoin="round"
                 />
-              )}
+                {/* Tracé principal contrasté */}
+                <polyline
+                  points={activeRoute.points.map((pt) => `${toMap(pt.x)},${toMap(pt.z)}`).join(" ")}
+                  fill="none"
+                  stroke="url(#routeGrad)"
+                  strokeWidth="5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                {/* Animation de chevrons le long de la route */}
+                <polyline
+                  points={activeRoute.points.map((pt) => `${toMap(pt.x)},${toMap(pt.z)}`).join(" ")}
+                  fill="none"
+                  stroke="#ffffff"
+                  strokeWidth="2.5"
+                  strokeDasharray="10 14"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  opacity="0.9"
+                />
+              </g>
+            )}
 
-              {visiblePlaces.map((place) => (
+            {/* ── LIEUX & POINTS D'INTÉRÊT INTERACTIFS ── */}
+            {visiblePlaces.map((place) => {
+              const mx = toMap(place.x);
+              const mz = toMap(place.z);
+              const isSelected = selectedPlace?.id === place.id;
+              const isTarget =
+                liveState.hasActiveDestination &&
+                Math.hypot(place.x - liveState.targetX, place.z - liveState.targetZ) < 15;
+
+              return (
                 <g
                   key={place.id}
-                  transform={`translate(${toMap(place.x)} ${toMap(place.z)})`}
-                  className="cursor-pointer"
-                  onPointerDown={(event) => event.stopPropagation()}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    setSelected(place);
+                  transform={`translate(${mx} ${mz})`}
+                  className="cursor-pointer transition-transform hover:scale-125"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedPlace(place);
                   }}
                 >
+                  {/* Cercle de sélection / cible */}
+                  {(isSelected || isTarget) && (
+                    <circle
+                      r={isSelected ? 18 : 14}
+                      fill="none"
+                      stroke={isTarget ? "#38bdf8" : "#f59e0b"}
+                      strokeWidth="3.5"
+                      className="animate-pulse"
+                    />
+                  )}
+
+                  {/* Pastille de repère */}
                   <circle
-                    r={selected?.id === place.id ? 15 : 10}
-                    fill={colorFor(place.kind)}
+                    r={isSelected ? 12 : 9}
+                    fill={colorFor(place.kind, place.type)}
                     stroke="#0f172a"
-                    strokeWidth="4"
+                    strokeWidth="2.5"
                   />
-                  <text y="-16" textAnchor="middle" fontSize="18">
+
+                  {/* Émoji représentatif */}
+                  <text y="-14" textAnchor="middle" fontSize={zoomTier >= 3 ? "14" : "11"}>
                     {place.emoji}
                   </text>
-                </g>
-              ))}
 
-              {hud.navActive && (
-                <g transform={`translate(${toMap(hud.navX)} ${toMap(hud.navZ)})`}>
-                  <circle r="20" fill="none" stroke="#38bdf8" strokeWidth="6" />
-                  <circle r="7" fill="#38bdf8" />
+                  {/* Libellé du lieu (selon niveau de zoom) */}
+                  {zoomTier >= 2 && (
+                    <text
+                      y="18"
+                      textAnchor="middle"
+                      fontSize="9"
+                      fontWeight="bold"
+                      fill="#ffffff"
+                      stroke="#0f172a"
+                      strokeWidth="2.5"
+                      paintOrder="stroke"
+                    >
+                      {place.short}
+                    </text>
+                  )}
                 </g>
-              )}
+              );
+            })}
 
-              <g transform={`translate(${player.x} ${player.y}) rotate(${(hud.playerHeading * 180) / Math.PI})`}>
-                <path d="M 0 -15 L 11 12 L 0 7 L -11 12 Z" fill="#ef4444" stroke="white" strokeWidth="3" />
+            {/* ── MARQUEUR DESTINATION ACTIVÉE ── */}
+            {liveState.hasActiveDestination && (
+              <g transform={`translate(${toMap(liveState.targetX)} ${toMap(liveState.targetZ)})`}>
+                <circle r="22" fill="none" stroke="#38bdf8" strokeWidth="4" opacity="0.6" className="animate-ping" />
+                <circle r="14" fill="#0284c7" stroke="#ffffff" strokeWidth="2.5" />
+                <text y="-22" textAnchor="middle" fontSize="16">📍</text>
+                <text
+                  y="22"
+                  textAnchor="middle"
+                  fontSize="10"
+                  fontWeight="black"
+                  fill="#38bdf8"
+                  stroke="#0f172a"
+                  strokeWidth="3"
+                  paintOrder="stroke"
+                >
+                  DESTINATION
+                </text>
               </g>
-              {hud.playerMode === "walk" && (
-                <g transform={`translate(${toMap(hud.vehicleX)} ${toMap(hud.vehicleZ)})`}>
-                  <rect x="-10" y="-10" width="20" height="20" rx="5" fill="#38bdf8" stroke="white" strokeWidth="3" />
-                  <text y="-16" textAnchor="middle" fontSize="16">Moto garée</text>
-                </g>
-              )}
-            </g>
-          </svg>
+            )}
 
-          <div className="absolute bottom-3 left-3 flex gap-2 text-[10px] font-bold">
-            <span className="rounded bg-amber-400 px-2 py-1 text-black">Commerces</span>
-            <span className="rounded bg-green-400 px-2 py-1 text-black">Restaurants</span>
-            <span className="rounded bg-fuchsia-400 px-2 py-1 text-black">Maison</span>
+            {/* ── MOTO / VÉHICULE DU JOUEUR GARÉ (EN MODE PIÉTON) ── */}
+            {liveState.mode === "walk" && (
+              <g transform={`translate(${toMap(liveState.vehicleX)} ${toMap(liveState.vehicleZ)})`}>
+                <rect x="-10" y="-10" width="20" height="20" rx="6" fill="#0284c7" stroke="#ffffff" strokeWidth="2" />
+                <text y="4" textAnchor="middle" fontSize="11">🛵</text>
+                <text y="-14" textAnchor="middle" fontSize="8" fontWeight="bold" fill="#38bdf8" stroke="#0f172a" strokeWidth="2" paintOrder="stroke">
+                  Véhicule garé
+                </text>
+              </g>
+            )}
+
+            {/* ── MARQUEUR DU JOUEUR EN TEMPS RÉEL (TOURNANT STRICTEMENT SELON LE HEADING) ── */}
+            <g transform={`translate(${playerScreenX} ${playerScreenY})`}>
+              {/* Onde de détection radar */}
+              <circle r="22" fill="#ef4444" fillOpacity="0.15" className="animate-ping" />
+              <circle r="15" fill="#ef4444" fillOpacity="0.25" />
+
+              {/* Balise rotative orientée selon l'angle réel */}
+              <g transform={`rotate(${playerAngleDeg})`}>
+                {/* Faisceau / Flèche de direction indiquant où regarde / roule le joueur */}
+                <path
+                  d="M 0 -24 L 9 -8 L 0 -13 L -9 -8 Z"
+                  fill="#ef4444"
+                  stroke="#ffffff"
+                  strokeWidth="2"
+                />
+                {/* Icône véhicule / piéton */}
+                <circle r="10" fill="#dc2626" stroke="#ffffff" strokeWidth="2" />
+                <text y="3.5" textAnchor="middle" fontSize="10">
+                  {vehicleEmoji}
+                </text>
+              </g>
+
+              {/* Étiquette joueur */}
+              <text
+                y="20"
+                textAnchor="middle"
+                fontSize="9"
+                fontWeight="black"
+                fill="#ffffff"
+                stroke="#0f172a"
+                strokeWidth="2.5"
+                paintOrder="stroke"
+              >
+                Moi ({liveState.mode === "walk" ? "À pied" : liveState.vehicleName})
+              </text>
+            </g>
+          </g>
+        </svg>
+
+        {/* ── MINI LÉGENDE RAPIDE AU BAS DE L'ÉCRAN ── */}
+        <div className="pointer-events-none absolute bottom-3 left-3 hidden sm:flex items-center gap-2 rounded-xl bg-slate-950/80 px-3 py-1.5 text-[10px] font-bold text-white/80 ring-1 ring-white/10 backdrop-blur-md">
+          <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-pink-500" /> Maison</span>
+          <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-amber-500" /> Boutiques</span>
+          <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-green-500" /> Restaurants</span>
+          <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-red-500" /> Carburant</span>
+          <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-sky-400" /> Itinéraire</span>
+        </div>
+
+        {/* ── BOUTONS FLOTTANTS : REVENIR AU JOUEUR & ZOOM ── */}
+        <div className="absolute bottom-4 right-4 flex flex-col gap-2">
+          {!followMode && (
+            <button
+              onClick={recenterOnPlayer}
+              className="flex items-center gap-2 rounded-2xl bg-sky-400 px-4 py-2.5 text-xs font-black text-slate-950 shadow-2xl ring-2 ring-sky-300 active:scale-95 animate-bounce"
+            >
+              <span>📍</span>
+              <span>Revenir au joueur</span>
+            </button>
+          )}
+
+          <div className="flex flex-col rounded-2xl bg-slate-900/90 ring-1 ring-white/20 shadow-xl overflow-hidden backdrop-blur-md">
+            <button
+              onClick={() => setZoomClamped(zoom + 0.5)}
+              className="flex h-10 w-10 items-center justify-center font-black text-lg hover:bg-white/10 active:bg-white/20"
+              title="Zoomer"
+            >
+              +
+            </button>
+            <div className="h-[1px] bg-white/10" />
+            <button
+              onClick={() => setZoomClamped(zoom - 0.5)}
+              className="flex h-10 w-10 items-center justify-center font-black text-lg hover:bg-white/10 active:bg-white/20"
+              title="Dézoomer"
+            >
+              −
+            </button>
           </div>
         </div>
       </div>
 
-      <aside className="hidden w-80 border-l border-white/10 bg-slate-900/90 p-4 md:block overflow-y-auto">
-        {selected ? (
-          <PlaceDetails
-            place={selected}
-            hud={hud}
-            onNavigate={() => onNavigate(selected.x, selected.z, selected.name)}
+      {/* ── PANNEAU LATÉRAL DE DÉTAIL DU LIEU SÉLECTIONNÉ (DESKTOP) ── */}
+      {selectedPlace && (
+        <aside className="hidden md:block absolute right-4 top-16 z-10 w-80 rounded-2xl bg-slate-900/95 p-4 shadow-2xl ring-1 ring-white/20 backdrop-blur-xl">
+          <PlaceCard
+            place={selectedPlace}
+            playerX={liveState.x}
+            playerZ={liveState.z}
+            isCurrentTarget={
+              liveState.hasActiveDestination &&
+              Math.hypot(selectedPlace.x - liveState.targetX, selectedPlace.z - liveState.targetZ) < 15
+            }
+            onGo={() => {
+              onNavigate(selectedPlace.x, selectedPlace.z, selectedPlace.name);
+            }}
             onCancel={onCancelNavigation}
+            onClose={() => setSelectedPlace(null)}
           />
-        ) : (
-          <div className="pt-10 text-center text-sm text-white/50">
-            Sélectionne un quartier, une avenue ou une activité pour afficher ses détails complets.
-          </div>
-        )}
-      </aside>
+        </aside>
+      )}
 
-      {selected && (
-        <div className="absolute inset-x-3 bottom-3 rounded-2xl bg-slate-900/95 p-3 shadow-2xl ring-1 ring-white/15 md:hidden">
-          <PlaceDetails
-            place={selected}
-            hud={hud}
+      {/* ── FICHE MODALE DU LIEU SÉLECTIONNÉ (MOBILE) ── */}
+      {selectedPlace && (
+        <div className="md:hidden absolute inset-x-3 bottom-3 z-20 rounded-2xl bg-slate-900/95 p-3.5 shadow-2xl ring-1 ring-white/20 backdrop-blur-xl">
+          <PlaceCard
+            place={selectedPlace}
+            playerX={liveState.x}
+            playerZ={liveState.z}
+            isCurrentTarget={
+              liveState.hasActiveDestination &&
+              Math.hypot(selectedPlace.x - liveState.targetX, selectedPlace.z - liveState.targetZ) < 15
+            }
             compact
-            onNavigate={() => onNavigate(selected.x, selected.z, selected.name)}
+            onGo={() => {
+              onNavigate(selectedPlace.x, selectedPlace.z, selectedPlace.name);
+            }}
             onCancel={onCancelNavigation}
+            onClose={() => setSelectedPlace(null)}
           />
         </div>
       )}
@@ -255,124 +747,84 @@ export default function CityMap({ hud, onNavigate, onCancelNavigation, onClose }
   );
 }
 
-function PlaceDetails({
+// ── COMPOSANT FICHE D'INFORMATIONS DU LIEU SÉLECTIONNÉ ──
+function PlaceCard({
   place,
-  hud,
-  onNavigate,
-  onCancel,
+  playerX,
+  playerZ,
+  isCurrentTarget,
   compact = false,
+  onGo,
+  onCancel,
+  onClose,
 }: {
   place: MapPlace;
-  hud: HudState;
-  onNavigate: () => void;
-  onCancel: () => void;
+  playerX: number;
+  playerZ: number;
+  isCurrentTarget: boolean;
   compact?: boolean;
+  onGo: () => void;
+  onCancel: () => void;
+  onClose: () => void;
 }) {
-  const activity = poiActivities[place.kind as PoiType];
-  const distanceMeters = Math.round(Math.hypot(hud.playerX - place.x, hud.playerZ - place.z));
-  const missionsRemaining = Math.max(0, 20 - hud.deliveriesDone);
-  const isTargetSelected = hud.navActive && hud.navLabel === place.name;
-
-  if (compact) {
-    return (
-      <div className="space-y-2">
-        <div className="flex items-center gap-3">
-          <div className="text-3xl">{place.emoji}</div>
-          <div className="min-w-0 flex-1">
-            <h3 className="font-black text-sm text-white">{place.name}</h3>
-            <div className="flex items-center gap-2 text-[11px] text-white/60">
-              <span>📍 {distanceMeters} m</span>
-              <span>•</span>
-              <span className="text-amber-300 font-bold">{missionsRemaining} missions disp.</span>
-            </div>
-          </div>
-          {isTargetSelected ? (
-            <button
-              onClick={onCancel}
-              className="rounded-xl bg-red-500/20 px-3 py-1.5 text-xs font-black text-red-300 ring-1 ring-red-500/30"
-            >
-              Annuler
-            </button>
-          ) : (
-            <button
-              onClick={onNavigate}
-              className="rounded-xl bg-sky-400 px-3 py-1.5 text-xs font-black text-slate-950 active:scale-95"
-            >
-              Itinéraire
-            </button>
-          )}
-        </div>
-      </div>
-    );
-  }
+  const directDistance = Math.round(Math.hypot(playerX - place.x, playerZ - place.z));
+  const roadRoute = useMemo(
+    () => calculateRoadRoute(playerX, playerZ, place.x, place.z, place.name),
+    [playerX, playerZ, place.x, place.z, place.name]
+  );
 
   return (
-    <div className="space-y-4 text-xs">
-      <div className="flex items-center gap-3 border-b border-white/10 pb-3">
-        <div className="text-4xl">{place.emoji}</div>
-        <div>
-          <div className="text-[10px] font-extrabold uppercase tracking-wider text-sky-400">
-            {place.kind}
+    <div className="space-y-3 text-xs">
+      <div className="flex items-start justify-between">
+        <div className="flex items-center gap-3">
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/10 text-3xl">
+            {place.emoji}
           </div>
-          <h3 className="text-base font-black text-white">{place.name}</h3>
+          <div>
+            <div className="text-[10px] font-extrabold uppercase tracking-wider text-sky-400">
+              {place.district}
+            </div>
+            <h3 className="text-base font-black text-white">{place.name}</h3>
+            <p className="text-[11px] text-white/50">{place.kind}</p>
+          </div>
         </div>
+        <button
+          onClick={onClose}
+          className="rounded-full bg-white/10 p-1.5 text-xs text-white/70 hover:bg-white/20 active:scale-90"
+        >
+          ✕
+        </button>
       </div>
 
-      {/* Informations demandées */}
-      <div className="space-y-2.5 rounded-xl bg-white/5 p-3 ring-1 ring-white/10">
+      <div className="grid grid-cols-2 gap-2 rounded-xl bg-white/5 p-2.5 ring-1 ring-white/10 text-center">
         <div>
-          <span className="text-white/50 block text-[10px] uppercase font-bold">Nom du quartier / lieu</span>
-          <span className="font-bold text-white text-sm">{place.name}</span>
+          <span className="text-[10px] font-semibold text-white/50">Distance route</span>
+          <div className="text-sm font-black text-amber-300">{formatDistance(roadRoute.distanceMeters)}</div>
         </div>
-
-        <div className="flex justify-between border-t border-white/5 pt-2">
-          <span className="text-white/50">Missions disponibles :</span>
-          <span className="font-black text-emerald-400">
-            {missionsRemaining} / 20 (Niv. {hud.level})
-          </span>
-        </div>
-
-        <div className="flex justify-between border-t border-white/5 pt-2">
-          <span className="text-white/50">Distance :</span>
-          <span className="font-bold text-sky-300">{distanceMeters} m</span>
-        </div>
-
-        <div className="border-t border-white/5 pt-2">
-          <span className="text-white/50 block mb-0.5">Points importants :</span>
-          <span className="text-white/80 leading-relaxed">
-            {activity || `${place.kind} au cœur de Beni avec accès routier asphalté et pistes de livraison.`}
-          </span>
-        </div>
-
-        <div className="flex justify-between border-t border-white/5 pt-2 items-center">
-          <span className="text-white/50">Destination sélectionnée :</span>
-          <span
-            className={`font-black rounded px-2 py-0.5 text-[10px] ${
-              isTargetSelected
-                ? "bg-emerald-500/20 text-emerald-300 ring-1 ring-emerald-500/40"
-                : "bg-white/10 text-white/50"
-            }`}
-          >
-            {isTargetSelected ? "✓ Active (Guidage)" : "Non"}
-          </span>
+        <div>
+          <span className="text-[10px] font-semibold text-white/50">À vol d'oiseau</span>
+          <div className="text-sm font-bold text-white/80">{formatDistance(directDistance)}</div>
         </div>
       </div>
 
-      {isTargetSelected ? (
-        <button
-          onClick={onCancel}
-          className="w-full rounded-xl bg-red-500/20 py-2.5 text-xs font-black text-red-300 ring-1 ring-red-500/30 hover:bg-red-500/30 transition"
-        >
-          Annuler la destination
-        </button>
-      ) : (
-        <button
-          onClick={onNavigate}
-          className="w-full rounded-xl bg-sky-400 py-2.5 text-xs font-black text-slate-950 hover:bg-sky-300 active:scale-95 transition"
-        >
-          Tracer l'itinéraire GPS
-        </button>
-      )}
+      <div className="flex gap-2">
+        {isCurrentTarget ? (
+          <button
+            onClick={onCancel}
+            className="flex-1 rounded-xl bg-red-500/20 py-2.5 text-xs font-black text-red-300 ring-1 ring-red-500/40 hover:bg-red-500/30 transition active:scale-95"
+          >
+            ✕ Annuler destination
+          </button>
+        ) : (
+          <button
+            onClick={onGo}
+            className="flex-1 flex items-center justify-center gap-2 rounded-xl bg-sky-400 py-2.5 text-xs font-black text-slate-950 shadow-lg shadow-sky-400/25 hover:bg-sky-300 transition active:scale-95"
+          >
+            <span>📍</span>
+            <span>Y ALLER</span>
+          </button>
+        )}
+      </div>
     </div>
   );
 }

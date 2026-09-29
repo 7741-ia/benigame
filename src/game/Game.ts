@@ -251,6 +251,7 @@ export class Game {
   private mountFrom = new THREE.Vector3();
   private mountTo = new THREE.Vector3();
   private lastWalkPos = new THREE.Vector2();
+  private walkerY = 0;
   private clientRig: Rig | null = null;
   private clientTalkT = 0;
   private homeRoom: HudState["homeRoom"] = "outside";
@@ -1667,11 +1668,13 @@ export class Game {
       const spot = this.dismountSpot();
       this.pos.copy(spot);
       this.lastWalkPos.copy(spot);
+      const groundY = this.getGroundHeight(spot.x, spot.y);
+      this.walkerY = groundY;
       // animation : le personnage glisse du siège vers le sol (≈0.7 s), pieds posés à l'arrivée
       this.mountDir = "out";
       this.mountT = 0.7;
-      this.mountFrom.copy(this.seatWorld()).setY(0.55);
-      this.mountTo.set(spot.x, 0, spot.y);
+      this.mountFrom.copy(this.seatWorld()).setY(Math.max(0.55, groundY + 0.35));
+      this.mountTo.set(spot.x, groundY, spot.y);
       this.walker.position.copy(this.mountFrom);
       this.walker.rotation.y = this.walkerHeading;
       this.walker.visible = true;
@@ -1687,7 +1690,7 @@ export class Game {
       // animation : marche vers le siège puis s'assoit ; le mode véhicule s'active à la fin
       this.mountDir = "in";
       this.mountT = 0.75;
-      this.mountFrom.set(this.pos.x, 0, this.pos.y);
+      this.mountFrom.set(this.pos.x, this.walkerY, this.pos.y);
       this.mountTo.copy(this.seatWorld()).setY(0.55);
       this.walkerPackage.visible = false;
       audio.vehicleEnter();
@@ -1726,6 +1729,7 @@ export class Game {
         audio.startEngine(this.vehicle.bodyType === "van" ? "van" : this.vehicle.bodyType === "sport" ? "car" : "moto");
       } else {
         this.walker.position.copy(this.mountTo);
+        this.walkerY = this.mountTo.y;
         audio.stopEngine();
       }
       this.emitHud();
@@ -1831,9 +1835,10 @@ export class Game {
     // Positionne le joueur à pied dans la cour pavée, face au porche et à la porte d'entrée
     this.pos.set(hx, hz + 6.2);
     this.walkerHeading = Math.PI; // orienté vers le nord, face à la porte
-    this.walker.position.set(this.pos.x, 0, this.pos.y);
-    this.camera.position.set(hx, 2.3, hz + 9.5);
-    this.camLook.set(hx, 1.4, hz + 4.5);
+    this.walkerY = this.getGroundHeight(this.pos.x, this.pos.y);
+    this.walker.position.set(this.pos.x, this.walkerY, this.pos.y);
+    this.camera.position.set(hx, this.walkerY + 2.3, hz + 9.5);
+    this.camLook.set(hx, this.walkerY + 1.4, hz + 4.5);
     this.camera.lookAt(this.camLook);
     this.snapCam = true;
     if (!houseManager.state.frontDoorOpen) {
@@ -2906,7 +2911,14 @@ export class Game {
     nz = Math.max(-bound, Math.min(bound, nz));
     const moved = Math.hypot(nx - this.pos.x, nz - this.pos.y);
     this.pos.set(nx, nz);
-    this.walker.position.set(nx, 0, nz);
+
+    const targetGroundY = this.getGroundHeight(nx, nz);
+    this.walkerY += (targetGroundY - this.walkerY) * Math.min(1, dt * 16);
+    // Verrou physique anti-traversée du sol : le joueur ne peut JAMAIS descendre sous la surface
+    if (this.walkerY < targetGroundY) {
+      this.walkerY = targetGroundY;
+    }
+    this.walker.position.set(nx, this.walkerY, nz);
     this.walker.rotation.y = this.walkerHeading;
 
     // Détection des pas sonores
@@ -2918,7 +2930,7 @@ export class Game {
         audio.step(isDirt ? "dirt" : "asphalt", running);
         // Éclaboussures sous les pas sur sol mouillé / sous la pluie
         if (this.env && (this.env.weather === "rain" || this.env.wetness > 0.3)) {
-          this.burst(nx, 0.08, nz, 0xc4e2fd, running ? 5 : 2, 1.2, 1.4, 0.2);
+          this.burst(nx, this.walkerY + 0.05, nz, 0xc4e2fd, running ? 5 : 2, 1.2, 1.4, 0.2);
         }
       }
     }
@@ -2936,6 +2948,14 @@ export class Game {
         houseManager.state.isSitting = false;
         houseManager.state.sittingTarget = null;
         audio.sitDown();
+      } else {
+        const hx = houseManager.hx || -104;
+        const hz = houseManager.hz || 156;
+        if (houseManager.state.sittingTarget === "sofa") {
+          this.walker.position.set(hx - 3.8, targetGroundY + 0.12, hz + 2.5);
+        } else if (houseManager.state.sittingTarget === "table") {
+          this.walker.position.set(hx + 2.4, targetGroundY + 0.12, hz + 3.6);
+        }
       }
     }
 
@@ -2998,7 +3018,8 @@ export class Game {
       if (Math.hypot(dx, dz) < 2.4) {
         this.pos.x -= fx * 1.2;
         this.pos.y -= fz * 1.2;
-        this.walker.position.set(this.pos.x, 0, this.pos.y);
+        this.walkerY = this.getGroundHeight(this.pos.x, this.pos.y);
+        this.walker.position.set(this.pos.x, this.walkerY, this.pos.y);
         this.fatigue = Math.min(100, this.fatigue + 10);
         this.triggerCrash();
         break;
@@ -3055,7 +3076,10 @@ export class Game {
   /** caméra épaule : derrière et légèrement au-dessus du personnage, recule en courant, ne traverse pas les murs */
   private updateWalkCamera(dt: number, fx: number, fz: number, running: boolean) {
     const px = this.walker.position.x;
+    const py = this.walker.position.y;
     const pz = this.walker.position.z;
+    const groundY = this.getGroundHeight(px, pz);
+
     // vue par-dessus l'épaule : décalée à droite pour ne pas cacher ce qui est devant (client, porte)
     let dist = running ? 6.0 : 5.0;
     let height = 3.4;
@@ -3078,18 +3102,32 @@ export class Game {
       cz = Math.max(hz - 4.3, Math.min(hz + 4.3, pz - fz * dist + rz * side));
     } else {
       // anti-obstruction : si la caméra tombe dans un mur ou sous un auvent/parasol, se rapprocher
-      for (let k = 0; k < 8 && this.cameraBlocked(cx, height, cz); k++) {
+      for (let k = 0; k < 8 && this.cameraBlocked(cx, height + groundY, cz); k++) {
         const f = 1 - (k + 1) / 8;
         cx = px - fx * dist * f + rx * side * f;
         cz = pz - fz * dist * f + rz * side * f;
-        height = Math.max(2.0, height - 0.15);
+        height = Math.max(1.8, height - 0.15);
       }
       // dernier recours : passer au-dessus de l'obstacle plutôt que de rester dedans
-      if (this.cameraBlocked(cx, height, cz)) height = 3.6;
+      if (this.cameraBlocked(cx, height + groundY, cz)) height = 3.6;
     }
-    const desired = new THREE.Vector3(cx, height, cz);
+
+    // Sécurité absolue anti-traversée du sol pour la caméra (ne peut jamais passer sous le sol)
+    const camGroundY = this.getGroundHeight(cx, cz);
+    const minCamY = camGroundY + 0.65;
+    const targetCamY = Math.max(minCamY, py + height);
+
+    const desired = new THREE.Vector3(cx, targetCamY, cz);
     this.camera.position.lerp(desired, this.snapCam ? 1 : Math.min(1, dt * 6));
-    const look = new THREE.Vector3(px + fx * 3.5 + rx * side * 0.5, 1.3, pz + fz * 3.5 + rz * side * 0.5);
+    if (this.camera.position.y < minCamY) {
+      this.camera.position.y = minCamY;
+    }
+
+    const look = new THREE.Vector3(
+      px + fx * 3.5 + rx * side * 0.5,
+      py + 1.3,
+      pz + fz * 3.5 + rz * side * 0.5
+    );
     if (this.snapCam) {
       this.camLook.copy(look);
       this.snapCam = false;
@@ -3127,6 +3165,59 @@ export class Game {
     this.navMarker.visible = false;
     audio.deliver();
     this.cb.onArrived?.(label);
+  }
+
+  /**
+   * Calcule avec précision la hauteur du sol au point (x, z).
+   * Empêche strictement le personnage piéton et la caméra de traverser le sol
+   * (trottoirs urbains surélevés à 0.3m, dalles de terrasse, intérieur carrelé de la maison).
+   */
+  public getGroundHeight(x: number, z: number): number {
+    const hx = houseManager.hx || -104;
+    const hz = houseManager.hz || 156;
+
+    // 1. Intérieur de la maison du joueur (sol carrelé surélevé à 0.30 m)
+    if (Math.abs(x - hx) <= 6.4 && Math.abs(z - hz) <= 4.9) {
+      return 0.30;
+    }
+
+    // 2. Porche d'entrée pavé et allée de la cour
+    if (Math.abs(x - hx) <= 3.8 && z >= hz + 4.8 && z <= hz + 10.5) {
+      return 0.20;
+    }
+
+    // 3. Abri véhicule / Carport de la maison
+    if (Math.abs(x - (hx + 8.2)) <= 2.2 && Math.abs(z - (hz + 5.5)) <= 2.4) {
+      return 0.20;
+    }
+
+    // 4. Bâtiments visitables (Mama Léontine, Shop Kivu Express, etc.)
+    if (this.city?.visitableBuildings) {
+      for (const vb of this.city.visitableBuildings) {
+        if (x >= vb.bounds.minX && x <= vb.bounds.maxX && z >= vb.bounds.minZ && z <= vb.bounds.maxZ) {
+          return 0.30;
+        }
+      }
+    }
+
+    // 5. Voirie vs Trottoirs d'îlots urbains
+    const modX = ((x + HALF) % CELL + CELL) % CELL;
+    const distRoadX = Math.min(modX, CELL - modX);
+    const modZ = ((z + HALF) % CELL + CELL) % CELL;
+    const distRoadZ = Math.min(modZ, CELL - modZ);
+    const roadDist = Math.min(distRoadX, distRoadZ);
+
+    // Chaussée asphaltée
+    if (roadDist <= 7.2) {
+      return 0.0;
+    }
+    // Raccord de bordure de trottoir
+    if (roadDist < 8.4) {
+      const t = (roadDist - 7.2) / 1.2;
+      return t * 0.30;
+    }
+    // Trottoir d'îlot surélevé
+    return 0.30;
   }
 
   /** vrai si le point (x,z) est à l'intérieur d'un bâtiment (test 2D des boîtes de collision) */
@@ -3169,7 +3260,8 @@ export class Game {
     this.walkerHeading = heading;
     this.bike.position.set(x, 0, z);
     this.bike.rotation.y = heading;
-    this.walker.position.set(x, 0, z);
+    this.walkerY = this.getGroundHeight(x, z);
+    this.walker.position.set(x, this.walkerY, z);
     this.snapCam = true;
   }
   /** temps de jeu écoulé (s) — permet aux tests d'attendre en temps simulé */
@@ -3183,6 +3275,41 @@ export class Game {
   setWeather(w: Weather) {
     this.env.setWeather(w, true);
     this.emitHud();
+  }
+
+  /** État cartographique haute précision en temps réel (pour CityMap et Minimap à 60 fps) */
+  getPlayerMapState() {
+    const missionTarget = this.hasPackage ? this.deliverPos : this.pickupPos;
+    const target = this.navActive
+      ? this.navPos
+      : this.freeRoam
+        ? this.pos
+        : missionTarget;
+    const targetLabel = this.navActive
+      ? this.navLabel
+      : this.freeRoam
+        ? "Exploration libre"
+        : this.hasPackage
+          ? this.deliverLabel
+          : this.pickupLabel;
+
+    return {
+      playerX: this.pos.x,
+      playerZ: this.pos.y,
+      playerHeading: this.playerMode === "walk" ? this.walkerHeading : this.heading,
+      playerMode: this.playerMode,
+      vehicleType: this.vehicle.bodyType,
+      vehicleName: this.vehicle.name,
+      targetX: target.x,
+      targetZ: target.y,
+      targetLabel,
+      navActive: this.navActive || (!this.freeRoam && this.phase === "playing"),
+      hasPackage: this.hasPackage,
+      vehicleX: this.bike.position.x,
+      vehicleZ: this.bike.position.z,
+      currentDistrict: getDistrictAt(this.pos.x, this.pos.y),
+      speedKmh: Math.round(Math.abs(this.speed) * 3.6),
+    };
   }
   /** instantané de l'état interne (tests automatisés uniquement) */
   debugState() {
@@ -3224,7 +3351,8 @@ export class Game {
     this.mountT = 0;
     this.pos.set(x, z);
     this.walkerHeading = heading;
-    this.walker.position.set(x, 0, z);
+    this.walkerY = this.getGroundHeight(x, z);
+    this.walker.position.set(x, this.walkerY, z);
     this.walker.rotation.y = heading;
     this.snapCam = true;
   }

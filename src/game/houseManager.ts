@@ -41,7 +41,7 @@ export class HouseManager {
     tvVolume: 75,
     frontDoorOpen: false,
     bedroomDoorOpen: true,
-    bathroomDoorOpen: false,
+    bathroomDoorOpen: true,
     fridgeOpen: false,
     tapFlowing: false,
     showerActive: false,
@@ -358,9 +358,9 @@ export class HouseManager {
         prompt: "Tirer la chasse d'eau",
         actionText: "Chasse",
         icon: "🚽",
-        x: hx + 2.0,
-        z: hz - 2.2,
-        radius: 1.8,
+        x: hx + 0.65,
+        z: hz - 2.5,
+        radius: 2.0,
       },
       // 12. Porte Chambre
       {
@@ -370,9 +370,9 @@ export class HouseManager {
         prompt: this.state.bedroomDoorOpen ? "Fermer la chambre" : "Ouvrir la chambre",
         actionText: this.state.bedroomDoorOpen ? "Fermer" : "Ouvrir",
         icon: "🚪",
-        x: hx - 1.2,
-        z: hz - 0.2,
-        radius: 2.0,
+        x: hx - 1.8,
+        z: hz,
+        radius: 2.2,
       },
       // 13. Porte Salle de bain
       {
@@ -382,9 +382,9 @@ export class HouseManager {
         prompt: this.state.bathroomDoorOpen ? "Fermer la salle de bain" : "Ouvrir la salle de bain",
         actionText: this.state.bathroomDoorOpen ? "Fermer" : "Ouvrir",
         icon: "🚪",
-        x: hx + 1.2,
-        z: hz - 0.2,
-        radius: 2.0,
+        x: hx + 1.8,
+        z: hz,
+        radius: 2.2,
       },
     ];
 

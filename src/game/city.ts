@@ -526,26 +526,34 @@ export function buildCity(scene: THREE.Scene, _quality: Quality): CityResult {
     add(woodMat, box(0.08, 1.1, 1.4, hx - hw / 2, floorY + 1.6, hz + 2.5, 1));
     add(glassMat, box(0.03, 0.9, 1.2, hx - hw / 2, floorY + 1.6, hz + 2.5, 1));
 
-    // ── CLOISONS INTÉRIEURES RÉALISTES ──
-    // Cloison Est-Ouest séparant jour (Sud) et nuit (Nord) avec passages de porte
-    add(wallMat, tint(box(hw * 0.42, wallH, wallThick, hx - hw * 0.28, wallH / 2 + floorY, hz, 2), 0xf6f3ed));
-    add(wallMat, tint(box(hw * 0.42, wallH, wallThick, hx + hw * 0.28, wallH / 2 + floorY, hz, 2), 0xf6f3ed));
-    // Cloison Nord-Sud séparant Chambre et Salle de bain
-    add(wallMat, tint(box(wallThick, wallH, hd * 0.45, hx, wallH / 2 + floorY, hz - hd * 0.26, 2), 0xf6f3ed));
+    // ── CLOISONS INTÉRIEURES RÉALISTES AVEC PORTES LARGES (1.4m D'OUVERTURE) ──
+    // 1. Cloison Ouest (chambre, à gauche de la porte)
+    add(wallMat, tint(box(4.0, wallH, wallThick, hx - 4.5, wallH / 2 + floorY, hz, 2), 0xf6f3ed));
+    // Linteau au-dessus de la porte de chambre
+    add(wallMat, tint(box(1.4, wallH - 2.15, wallThick, hx - 1.8, 2.15 + (wallH - 2.15) / 2 + floorY, hz, 1), 0xf6f3ed));
+    // 2. Cloison centrale entre les deux portes
+    add(wallMat, tint(box(2.2, wallH, wallThick, hx, wallH / 2 + floorY, hz, 2), 0xf6f3ed));
+    // Linteau au-dessus de la porte de salle de bain
+    add(wallMat, tint(box(1.4, wallH - 2.15, wallThick, hx + 1.8, 2.15 + (wallH - 2.15) / 2 + floorY, hz, 1), 0xf6f3ed));
+    // 3. Cloison Est (salle de bain, à droite de la porte)
+    add(wallMat, tint(box(4.0, wallH, wallThick, hx + 4.5, wallH / 2 + floorY, hz, 2), 0xf6f3ed));
+    // 4. Cloison Nord-Sud séparant Chambre et Salle de bain
+    const divWallLen = hd / 2 - wallThick / 2;
+    add(wallMat, tint(box(wallThick, wallH, divWallLen, hx, wallH / 2 + floorY, hz - divWallLen / 2 - wallThick / 4, 2), 0xf6f3ed));
 
-    // Portes intérieures pivotantes en bois
+    // Portes intérieures pivotantes en bois (battants larges 1.3m s'ouvrant contre les murs)
     const bedHinge = new THREE.Group();
-    bedHinge.position.set(hx - 0.65, floorY + 0.1, hz);
-    const bedDoorMesh = new THREE.Mesh(new THREE.BoxGeometry(0.85, 2.1, 0.05), woodMat);
-    bedDoorMesh.position.set(-0.85 / 2, 2.1 / 2, 0);
+    bedHinge.position.set(hx - 2.45, floorY + 0.1, hz);
+    const bedDoorMesh = new THREE.Mesh(new THREE.BoxGeometry(1.3, 2.15, 0.05), woodMat);
+    bedDoorMesh.position.set(1.3 / 2, 2.15 / 2, 0);
     bedHinge.add(bedDoorMesh);
     scene.add(bedHinge);
     houseManager.bedroomDoorGroup = bedHinge;
 
     const bathHinge = new THREE.Group();
-    bathHinge.position.set(hx + 0.65, floorY + 0.1, hz);
-    const bathDoorMesh = new THREE.Mesh(new THREE.BoxGeometry(0.85, 2.1, 0.05), woodMat);
-    bathDoorMesh.position.set(0.85 / 2, 2.1 / 2, 0);
+    bathHinge.position.set(hx + 2.45, floorY + 0.1, hz);
+    const bathDoorMesh = new THREE.Mesh(new THREE.BoxGeometry(1.3, 2.15, 0.05), woodMat);
+    bathDoorMesh.position.set(-1.3 / 2, 2.15 / 2, 0);
     bathHinge.add(bathDoorMesh);
     scene.add(bathHinge);
     houseManager.bathroomDoorGroup = bathHinge;
@@ -814,9 +822,9 @@ export function buildCity(scene: THREE.Scene, _quality: Quality): CityResult {
     add(steelMat, box(0.6, 0.04, 0.08, hx + 1.4, floorY + 1.2, hz - 4.48, 1));
     add(paintMat, tint(box(0.45, 0.65, 0.06, hx + 1.4, floorY + 0.95, hz - 4.45, 1), 0x0284c7));
 
-    // Toilettes modernes avec réservoir
-    add(paintMat, tint(box(0.48, 0.45, 0.58, hx + 2.0, floorY + 0.23, hz - 2.2, 1), 0xf8fafc));
-    add(paintMat, tint(box(0.48, 0.48, 0.24, hx + 2.0, floorY + 0.68, hz - 2.45, 1), 0xf8fafc));
+    // Toilettes modernes avec réservoir (adossées au mur séparateur pour dégager l'accès)
+    add(paintMat, tint(box(0.58, 0.45, 0.48, hx + 0.65, floorY + 0.23, hz - 2.5, 1), 0xf8fafc));
+    add(paintMat, tint(box(0.24, 0.48, 0.48, hx + 0.35, floorY + 0.68, hz - 2.5, 1), 0xf8fafc));
 
     // ── ÉCLAIRAGE INTÉRIEUR AMBIANT (PLAFONNIER) ──
     const ceilingLight = new THREE.PointLight(0xfff5ea, 1.5, 20);
@@ -855,22 +863,31 @@ export function buildCity(scene: THREE.Scene, _quality: Quality): CityResult {
     addTree(hx + 8.5, hz - 2.5, 1.15);
 
     // ── COLLISIONS PHYSIQUES RÉALISTES ──
-    // Murs extérieurs
-    colliders.push({ x: hx - doorW / 2 - frontHalf / 2, z: hz + hd / 2, hw: frontHalf / 2, hd: wallThick });
-    colliders.push({ x: hx + doorW / 2 + frontHalf / 2, z: hz + hd / 2, hw: frontHalf / 2, hd: wallThick });
-    colliders.push({ x: hx, z: hz - hd / 2, hw: hw / 2, hd: wallThick });
-    colliders.push({ x: hx + hw / 2, z: hz, hw: wallThick, hd: hd / 2 });
-    colliders.push({ x: hx - hw / 2, z: hz, hw: wallThick, hd: hd / 2 });
-    // Cloisons intérieures
-    colliders.push({ x: hx - hw * 0.28, z: hz, hw: (hw * 0.42) / 2, hd: wallThick });
-    colliders.push({ x: hx + hw * 0.28, z: hz, hw: (hw * 0.42) / 2, hd: wallThick });
-    colliders.push({ x: hx, z: hz - hd * 0.26, hw: wallThick, hd: (hd * 0.45) / 2 });
-    // Meubles volumineux (colliders pour ne pas traverser canapé, lit, cuisine, frigo)
-    colliders.push({ x: hx - 3.8, z: hz + 2.8, hw: 1.25, hd: 0.55 });
-    colliders.push({ x: hx + 4.2, z: hz + 1.6, hw: 0.45, hd: 1.4 });
-    colliders.push({ x: hx + 5.5, z: hz + 3.4, hw: 0.5, hd: 0.5 });
-    colliders.push({ x: hx - 4.2, z: hz - 3.2, hw: 1.15, hd: 0.95 });
-    colliders.push({ x: hx + 2.4, z: hz + 3.6, hw: 0.85, hd: 0.65 });
+    // Murs extérieurs (avec demi-épaisseur exacte wallThick / 2 = 0.14)
+    colliders.push({ x: hx - doorW / 2 - frontHalf / 2, z: hz + hd / 2, hw: frontHalf / 2, hd: wallThick / 2 });
+    colliders.push({ x: hx + doorW / 2 + frontHalf / 2, z: hz + hd / 2, hw: frontHalf / 2, hd: wallThick / 2 });
+    colliders.push({ x: hx, z: hz - hd / 2, hw: hw / 2, hd: wallThick / 2 });
+    colliders.push({ x: hx + hw / 2, z: hz, hw: wallThick / 2, hd: hd / 2 });
+    colliders.push({ x: hx - hw / 2, z: hz, hw: wallThick / 2, hd: hd / 2 });
+
+    // Cloisons intérieures avec passages de porte spacieux (1.4m d'ouverture)
+    // 1. Cloison Ouest (chambre, à gauche de la porte)
+    colliders.push({ x: hx - 4.5, z: hz, hw: 2.0, hd: wallThick / 2 });
+    // 2. Cloison centrale (entre chambre et salle de bain)
+    colliders.push({ x: hx, z: hz, hw: 1.1, hd: wallThick / 2 });
+    // 3. Cloison Est (salle de bain, à droite de la porte)
+    colliders.push({ x: hx + 4.5, z: hz, hw: 2.0, hd: wallThick / 2 });
+    // 4. Cloison séparatrice Nord-Sud (entre chambre et salle de bain)
+    colliders.push({ x: hx, z: hz - divWallLen / 2, hw: wallThick / 2, hd: divWallLen / 2 });
+
+    // Meubles volumineux (colliders pour ne pas traverser canapé, lit, cuisine, frigo, sanitaires)
+    colliders.push({ x: hx - 3.8, z: hz + 2.8, hw: 1.25, hd: 0.55 }); // Canapé salon
+    colliders.push({ x: hx + 4.2, z: hz + 1.6, hw: 0.45, hd: 1.4 });  // Plan travail cuisine
+    colliders.push({ x: hx + 5.5, z: hz + 3.4, hw: 0.5, hd: 0.5 });   // Réfrigérateur
+    colliders.push({ x: hx - 4.2, z: hz - 3.2, hw: 1.15, hd: 0.95 }); // Grand lit chambre
+    colliders.push({ x: hx + 2.4, z: hz + 3.6, hw: 0.85, hd: 0.65 }); // Table à manger
+    colliders.push({ x: hx + 4.8, z: hz - 3.8, hw: 0.7, hd: 0.7 });   // Douche salle de bain
+    colliders.push({ x: hx + 0.65, z: hz - 2.5, hw: 0.35, hd: 0.35 }); // Toilettes salle de bain
 
     const doorX = hx;
     const doorZ = hz + hd / 2 + 1.2;

@@ -116,6 +116,23 @@ export default function App() {
   const [life, setLife] = useState<LifeState>(loadLife());
   const [career, setCareer] = useState<CareerProgress>(loadProgress());
   const [mapOpen, setMapOpen] = useState(false);
+  const [districtToast, setDistrictToast] = useState<string | null>(null);
+  const prevDistrictRef = useRef<string>("");
+
+  useEffect(() => {
+    const dist = hud.currentDistrict;
+    if (dist && dist !== prevDistrictRef.current && hud.phase === "playing") {
+      if (prevDistrictRef.current !== "") {
+        setDistrictToast(dist);
+        const timer = setTimeout(() => {
+          setDistrictToast(null);
+        }, 3500);
+        prevDistrictRef.current = dist;
+        return () => clearTimeout(timer);
+      }
+      prevDistrictRef.current = dist;
+    }
+  }, [hud.currentDistrict, hud.phase]);
   const [phoneOpen, setPhoneOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [lifePanel, setLifePanel] = useState<"market" | "activities" | null>(null);
@@ -757,7 +774,11 @@ export default function App() {
                   ⏸
                 </button>
               </div>
-              <Minimap hud={hud} onOpenMap={openMap} />
+              <Minimap
+                hud={hud}
+                getLivePlayerState={() => gameRef.current?.getPlayerMapState()}
+                onOpenMap={openMap}
+              />
             </div>
           </div>
 
